@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import base64
 from PIL import Image
-import urllib.request
 
 # Set page config
 st.set_page_config(page_title="🎓 DIP Learning Tool", layout="wide", initial_sidebar_state="expanded")
@@ -14,31 +13,89 @@ st.set_page_config(page_title="🎓 DIP Learning Tool", layout="wide", initial_s
 # HELPER FUNCTIONS
 # ==========================================
 
-# Sample images from the web
-SAMPLE_IMAGES = {
-    "Lena (Standard)": "https://upload.wikimedia.org/wikipedia/en/7/7d/Lenna_%28test_image%29.png",
-    "Cameraman": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Cameraman.tif/lossy-page1-256px-Cameraman.tif.jpg",
-    "Peppers": "https://upload.wikimedia.org/wikipedia/en/8/8c/PSR_B1509-58_-_Chandra_X-ray_Observatory.jpg",
-    "Moon (Astronomy)": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/FullMoon2010.jpg/280px-FullMoon2010.jpg",
-}
-
+# Generate sample images programmatically (reliable, no network needed)
 @st.cache_data
-def load_sample_image(url):
-    """Load image from URL"""
-    try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            image_data = response.read()
-        nparr = np.frombuffer(image_data, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-        if img is not None:
-            # Resize to reasonable size
-            if max(img.shape) > 512:
-                scale = 512 / max(img.shape)
-                img = cv2.resize(img, None, fx=scale, fy=scale)
-        return img
-    except Exception as e:
-        return None
+def generate_sample_images():
+    """Generate sample images for testing"""
+    samples = {}
+    size = 256
+    
+    # 1. Lena-like (face-like pattern with smooth gradients)
+    lena = np.zeros((size, size), dtype=np.uint8)
+    # Create a face-like pattern
+    cv2.ellipse(lena, (128, 128), (80, 100), 0, 0, 360, 180, -1)  # Face
+    cv2.ellipse(lena, (100, 110), (15, 10), 0, 0, 360, 80, -1)   # Left eye
+    cv2.ellipse(lena, (156, 110), (15, 10), 0, 0, 360, 80, -1)   # Right eye
+    cv2.ellipse(lena, (128, 160), (20, 10), 0, 0, 180, 100, 2)   # Mouth
+    # Add some texture
+    noise = np.random.randint(0, 30, (size, size), dtype=np.uint8)
+    lena = cv2.add(lena, noise)
+    lena = cv2.GaussianBlur(lena, (5, 5), 2)
+    samples["Portrait (Face Pattern)"] = lena
+    
+    # 2. Cameraman-like (figure with tripod)
+    cam = np.ones((size, size), dtype=np.uint8) * 200  # Sky background
+    cam[180:, :] = 100  # Ground
+    # Person shape
+    cv2.rectangle(cam, (100, 80), (150, 180), 60, -1)  # Body
+    cv2.circle(cam, (125, 60), 25, 50, -1)  # Head
+    # Tripod
+    cv2.line(cam, (160, 120), (200, 200), 40, 3)
+    cv2.line(cam, (160, 120), (180, 200), 40, 3)
+    cv2.line(cam, (160, 120), (220, 200), 40, 3)
+    cv2.rectangle(cam, (155, 100), (185, 130), 30, -1)  # Camera
+    cam = cv2.GaussianBlur(cam, (3, 3), 1)
+    samples["Cameraman (Figure)"] = cam
+    
+    # 3. Peppers-like (organic shapes with varying intensities)
+    pep = np.ones((size, size), dtype=np.uint8) * 80
+    # Create pepper-like shapes
+    cv2.ellipse(pep, (80, 100), (50, 35), -20, 0, 360, 180, -1)
+    cv2.ellipse(pep, (180, 90), (40, 50), 30, 0, 360, 120, -1)
+    cv2.ellipse(pep, (130, 180), (45, 40), 10, 0, 360, 200, -1)
+    cv2.ellipse(pep, (200, 180), (35, 30), -15, 0, 360, 150, -1)
+    cv2.ellipse(pep, (60, 190), (30, 35), 5, 0, 360, 100, -1)
+    # Add highlights
+    for _ in range(20):
+        x, y = np.random.randint(30, 226, 2)
+        cv2.circle(pep, (x, y), np.random.randint(3, 8), np.random.randint(160, 255), -1)
+    pep = cv2.GaussianBlur(pep, (7, 7), 3)
+    samples["Peppers (Organic Shapes)"] = pep
+    
+    # 4. Moon (circular with craters)
+    moon = np.zeros((size, size), dtype=np.uint8)
+    cv2.circle(moon, (128, 128), 100, 200, -1)  # Moon surface
+    # Add craters
+    craters = [(90, 100, 15), (150, 80, 20), (160, 150, 12), (100, 160, 18), (130, 120, 10)]
+    for cx, cy, r in craters:
+        cv2.circle(moon, (cx, cy), r, 140, -1)
+        cv2.circle(moon, (cx-2, cy-2), r-3, 170, -1)  # Highlight
+    moon = cv2.GaussianBlur(moon, (5, 5), 2)
+    samples["Moon (Astronomy)"] = moon
+    
+    # 5. Building/Architecture
+    bldg = np.ones((size, size), dtype=np.uint8) * 180  # Sky
+    # Main building
+    cv2.rectangle(bldg, (60, 80), (180, 240), 100, -1)
+    # Windows grid
+    for row in range(4):
+        for col in range(4):
+            x = 70 + col * 28
+            y = 95 + row * 35
+            cv2.rectangle(bldg, (x, y), (x+18, y+25), 50, -1)
+    # Door
+    cv2.rectangle(bldg, (100, 190), (140, 240), 60, -1)
+    # Small building
+    cv2.rectangle(bldg, (190, 150), (240, 240), 120, -1)
+    samples["Building (Architecture)"] = bldg
+    
+    # 6. Gradient (for testing transforms)
+    gradient = np.tile(np.arange(256, dtype=np.uint8), (256, 1))
+    samples["Gradient (Horizontal)"] = gradient
+    
+    return samples
+
+SAMPLE_IMAGES = generate_sample_images()
 
 def add_noise(image, noise_type, amount):
     """Add noise to image for testing filters"""
@@ -116,6 +173,7 @@ Learn and experiment with **Digital Image Processing** techniques interactively!
 - 🔲 **Spatial Filtering** - Neighborhood operations using kernels
 - 📈 **Frequency Domain** - Fourier transform based filtering  
 - 🔷 **Morphological Operations** - Shape-based binary operations
+- ✂️ **Image Segmentation** - Dividing images into meaningful regions
 """)
 
 # --- Sidebar: Image Source Selection ---
@@ -132,10 +190,7 @@ if image_source == "Upload Your Image":
         
 elif image_source == "Use Sample Image":
     sample_choice = st.sidebar.selectbox("Select sample image:", list(SAMPLE_IMAGES.keys()))
-    with st.spinner(f"Loading {sample_choice}..."):
-        original_image = load_sample_image(SAMPLE_IMAGES[sample_choice])
-    if original_image is None:
-        st.sidebar.warning("Could not load sample image. Please upload your own.")
+    original_image = SAMPLE_IMAGES[sample_choice].copy()
         
 elif image_source == "Generate Test Pattern":
     pattern_type = st.sidebar.selectbox("Pattern type:", ["Gradient", "Checkerboard", "Circles", "Text"])
@@ -201,7 +256,8 @@ if original_image is not None:
             "1. Intensity Transformations (Point)", 
             "2. Spatial Filtering (Neighborhood)",
             "3. Frequency Domain (Fourier)",
-            "4. Morphological Operations (Shape)"
+            "4. Morphological Operations (Shape)",
+            "5. Image Segmentation (Region)"
         )
     )
 
@@ -893,6 +949,396 @@ if original_image is not None:
                 processed_image = cv2.subtract(working_image, eroded)
                 st.sidebar.info("Subtracting eroded image from original gives the boundary.")
 
+    # ==========================================
+    # 5. IMAGE SEGMENTATION
+    # ==========================================
+    elif "Segmentation" in operation_type:
+        st.header("5. Image Segmentation")
+        tab_vis, tab_theory = st.tabs(["🎨 Interactive Lab", "📖 Theory & Formulas"])
+        
+        with tab_theory:
+            st.markdown(r"""
+            ## 📚 Image Segmentation
+            
+            ### Concept
+            Segmentation divides an image into **meaningful regions** (objects).
+            
+            ---
+            
+            ### 1️⃣ Pixel-Based (Thresholding)
+            
+            **Single Thresholding:**
+            $$g(x,y) = \begin{cases} 1, & f(x,y) > T \\ 0, & f(x,y) \leq T \end{cases}$$
+            
+            **Otsu's Method:** Automatically finds optimal threshold by maximizing between-class variance.
+            
+            **Adaptive Thresholding:** Uses local thresholds for uneven illumination.
+            
+            ---
+            
+            ### 2️⃣ Edge-Based Segmentation
+            
+            **Gradient Magnitude:**
+            $$|\nabla f| = |G_x| + |G_y|$$
+            
+            **Roberts Operator:**
+            $$G_x = f(x,y) - f(x+1,y+1), \quad G_y = f(x+1,y) - f(x,y+1)$$
+            
+            **Canny Edge Detection:** Multi-stage algorithm with:
+            1. Gaussian smoothing
+            2. Gradient calculation
+            3. Non-maximum suppression
+            4. Hysteresis thresholding
+            
+            ---
+            
+            ### 3️⃣ Region-Based Segmentation
+            
+            **Region Growing:** Start with seeds, add similar neighbors.
+            
+            **Split-and-Merge:** Quadtree splitting + merging uniform regions.
+            
+            **Watershed:** Treats image as topographic surface, finds "catchment basins".
+            """)
+        
+        with tab_vis:
+            st.sidebar.subheader("Segmentation Methods")
+            
+            seg_category = st.sidebar.selectbox(
+                "Category:",
+                ["Pixel-Based (Thresholding)", "Edge-Based Segmentation", "Region-Based Segmentation"]
+            )
+            
+            # ==========================================
+            # 5.1 PIXEL-BASED (THRESHOLDING)
+            # ==========================================
+            if seg_category == "Pixel-Based (Thresholding)":
+                thresh_method = st.sidebar.selectbox(
+                    "Thresholding Method:",
+                    ["Global (Manual)", "Otsu's Automatic", "Adaptive Mean", "Adaptive Gaussian", 
+                     "Multiple Thresholding", "Iterative Selection"]
+                )
+                
+                if thresh_method == "Global (Manual)":
+                    thresh_val = st.sidebar.slider("Threshold Value (T)", 0, 255, 127)
+                    thresh_type = st.sidebar.selectbox("Type:", ["Binary", "Binary Inverse", "Truncate", "To Zero", "To Zero Inverse"])
+                    
+                    type_map = {
+                        "Binary": cv2.THRESH_BINARY,
+                        "Binary Inverse": cv2.THRESH_BINARY_INV,
+                        "Truncate": cv2.THRESH_TRUNC,
+                        "To Zero": cv2.THRESH_TOZERO,
+                        "To Zero Inverse": cv2.THRESH_TOZERO_INV
+                    }
+                    _, processed_image = cv2.threshold(original_image, thresh_val, 255, type_map[thresh_type])
+                    st.sidebar.info(f"g(x,y) = 255 if f(x,y) > {thresh_val}, else 0")
+                    
+                elif thresh_method == "Otsu's Automatic":
+                    otsu_thresh, processed_image = cv2.threshold(original_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                    st.sidebar.success(f"Otsu's optimal threshold: **{otsu_thresh:.0f}**")
+                    st.sidebar.info("Maximizes between-class variance to find optimal T.")
+                    
+                elif thresh_method == "Adaptive Mean":
+                    block_size = st.sidebar.slider("Block Size", 3, 99, 11, step=2)
+                    c_val = st.sidebar.slider("Constant C", -20, 20, 2)
+                    processed_image = cv2.adaptiveThreshold(
+                        original_image, 255, cv2.ADAPTIVE_THRESH_MEAN_C, 
+                        cv2.THRESH_BINARY, block_size, c_val
+                    )
+                    st.sidebar.info("T = mean of block - C. Good for uneven illumination.")
+                    
+                elif thresh_method == "Adaptive Gaussian":
+                    block_size = st.sidebar.slider("Block Size", 3, 99, 11, step=2)
+                    c_val = st.sidebar.slider("Constant C", -20, 20, 2)
+                    processed_image = cv2.adaptiveThreshold(
+                        original_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                        cv2.THRESH_BINARY, block_size, c_val
+                    )
+                    st.sidebar.info("T = Gaussian-weighted mean of block - C.")
+                    
+                elif thresh_method == "Multiple Thresholding":
+                    t1 = st.sidebar.slider("Threshold 1 (T1)", 0, 255, 85)
+                    t2 = st.sidebar.slider("Threshold 2 (T2)", 0, 255, 170)
+                    
+                    # Create 3-level segmentation
+                    processed_image = np.zeros_like(original_image)
+                    processed_image[original_image <= t1] = 0
+                    processed_image[(original_image > t1) & (original_image <= t2)] = 127
+                    processed_image[original_image > t2] = 255
+                    st.sidebar.info(f"3 levels: [0-{t1}]=Black, [{t1}-{t2}]=Gray, [{t2}-255]=White")
+                    
+                elif thresh_method == "Iterative Selection":
+                    # Implement iterative threshold selection
+                    max_iter = st.sidebar.slider("Max Iterations", 5, 50, 20)
+                    
+                    # Initial T = mean intensity
+                    T = np.mean(original_image)
+                    iterations = 0
+                    
+                    for i in range(max_iter):
+                        # Separate pixels
+                        G1 = original_image[original_image > T]
+                        G2 = original_image[original_image <= T]
+                        
+                        if len(G1) == 0 or len(G2) == 0:
+                            break
+                        
+                        # New threshold
+                        m1 = np.mean(G1)
+                        m2 = np.mean(G2)
+                        T_new = (m1 + m2) / 2
+                        iterations = i + 1
+                        
+                        if abs(T - T_new) < 0.5:
+                            break
+                        T = T_new
+                    
+                    _, processed_image = cv2.threshold(original_image, int(T), 255, cv2.THRESH_BINARY)
+                    st.sidebar.success(f"Converged T = **{T:.1f}** in {iterations} iterations")
+                    st.sidebar.info("T = (mean_object + mean_background) / 2")
+            
+            # ==========================================
+            # 5.2 EDGE-BASED SEGMENTATION
+            # ==========================================
+            elif seg_category == "Edge-Based Segmentation":
+                edge_method = st.sidebar.selectbox(
+                    "Edge Detection Method:",
+                    ["Point Detection", "Line Detection", "Roberts", "Prewitt", "Sobel", 
+                     "Laplacian (LoG)", "Canny", "Zero-Crossing"]
+                )
+                
+                if edge_method == "Point Detection":
+                    # Laplacian-based point detection
+                    kernel = np.array([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]])
+                    thresh = st.sidebar.slider("Detection Threshold", 0, 255, 50)
+                    
+                    filtered = cv2.filter2D(original_image, cv2.CV_64F, kernel)
+                    processed_image = np.uint8(np.abs(filtered) > thresh) * 255
+                    st.sidebar.info("Detects isolated points using Laplacian mask.")
+                    
+                elif edge_method == "Line Detection":
+                    line_dir = st.sidebar.selectbox("Line Direction:", ["Horizontal", "Vertical", "+45°", "-45°"])
+                    thresh = st.sidebar.slider("Detection Threshold", 0, 255, 50)
+                    
+                    kernels = {
+                        "Horizontal": np.array([[-1, -1, -1], [2, 2, 2], [-1, -1, -1]]),
+                        "Vertical": np.array([[-1, 2, -1], [-1, 2, -1], [-1, 2, -1]]),
+                        "+45°": np.array([[-1, -1, 2], [-1, 2, -1], [2, -1, -1]]),
+                        "-45°": np.array([[2, -1, -1], [-1, 2, -1], [-1, -1, 2]])
+                    }
+                    
+                    filtered = cv2.filter2D(original_image, cv2.CV_64F, kernels[line_dir])
+                    processed_image = np.uint8(np.abs(filtered) > thresh) * 255
+                    st.sidebar.info(f"Detects {line_dir} lines using directional mask.")
+                    
+                elif edge_method == "Roberts":
+                    # Roberts cross operator
+                    kernel_x = np.array([[1, 0], [0, -1]], dtype=np.float64)
+                    kernel_y = np.array([[0, 1], [-1, 0]], dtype=np.float64)
+                    
+                    Gx = cv2.filter2D(original_image.astype(np.float64), -1, kernel_x)
+                    Gy = cv2.filter2D(original_image.astype(np.float64), -1, kernel_y)
+                    
+                    magnitude = np.abs(Gx) + np.abs(Gy)
+                    processed_image = np.clip(magnitude, 0, 255).astype(np.uint8)
+                    st.sidebar.info("Roberts: Gx = f(x,y) - f(x+1,y+1), Gy = f(x+1,y) - f(x,y+1)")
+                    
+                elif edge_method == "Prewitt":
+                    kernel_x = np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]], dtype=np.float64)
+                    kernel_y = np.array([[-1, -1, -1], [0, 0, 0], [1, 1, 1]], dtype=np.float64)
+                    
+                    Gx = cv2.filter2D(original_image.astype(np.float64), -1, kernel_x)
+                    Gy = cv2.filter2D(original_image.astype(np.float64), -1, kernel_y)
+                    
+                    magnitude = np.sqrt(Gx**2 + Gy**2)
+                    processed_image = np.clip(magnitude, 0, 255).astype(np.uint8)
+                    st.sidebar.info("Prewitt operator with 3x3 kernels.")
+                    
+                elif edge_method == "Sobel":
+                    ksize = st.sidebar.selectbox("Kernel Size:", [3, 5, 7])
+                    
+                    Gx = cv2.Sobel(original_image, cv2.CV_64F, 1, 0, ksize=ksize)
+                    Gy = cv2.Sobel(original_image, cv2.CV_64F, 0, 1, ksize=ksize)
+                    
+                    magnitude = np.sqrt(Gx**2 + Gy**2)
+                    processed_image = np.clip(magnitude, 0, 255).astype(np.uint8)
+                    st.sidebar.info("Sobel uses weighted gradients for noise reduction.")
+                    
+                elif edge_method == "Laplacian (LoG)":
+                    # Laplacian of Gaussian
+                    blur_sigma = st.sidebar.slider("Gaussian Sigma", 0.5, 5.0, 1.0, step=0.5)
+                    
+                    blurred = cv2.GaussianBlur(original_image, (0, 0), blur_sigma)
+                    laplacian = cv2.Laplacian(blurred, cv2.CV_64F)
+                    processed_image = np.clip(np.abs(laplacian), 0, 255).astype(np.uint8)
+                    st.sidebar.info("Laplacian of Gaussian (LoG) for second-order edge detection.")
+                    
+                elif edge_method == "Canny":
+                    low_thresh = st.sidebar.slider("Low Threshold", 0, 255, 50)
+                    high_thresh = st.sidebar.slider("High Threshold", 0, 255, 150)
+                    aperture = st.sidebar.selectbox("Aperture Size:", [3, 5, 7])
+                    
+                    processed_image = cv2.Canny(original_image, low_thresh, high_thresh, apertureSize=aperture)
+                    st.sidebar.info("Canny: Smoothing → Gradient → Non-max suppression → Hysteresis")
+                    
+                elif edge_method == "Zero-Crossing":
+                    # Zero-crossing using Laplacian
+                    blur_sigma = st.sidebar.slider("Gaussian Sigma", 0.5, 5.0, 1.5, step=0.5)
+                    
+                    blurred = cv2.GaussianBlur(original_image, (0, 0), blur_sigma)
+                    laplacian = cv2.Laplacian(blurred, cv2.CV_64F)
+                    
+                    # Detect zero crossings
+                    rows, cols = laplacian.shape
+                    zero_cross = np.zeros((rows, cols), dtype=np.uint8)
+                    
+                    for i in range(1, rows-1):
+                        for j in range(1, cols-1):
+                            patch = laplacian[i-1:i+2, j-1:j+2]
+                            if patch.min() * patch.max() < 0:  # Sign change
+                                zero_cross[i, j] = 255
+                    
+                    processed_image = zero_cross
+                    st.sidebar.info("Zero-crossings of LoG indicate edges.")
+            
+            # ==========================================
+            # 5.3 REGION-BASED SEGMENTATION
+            # ==========================================
+            elif seg_category == "Region-Based Segmentation":
+                region_method = st.sidebar.selectbox(
+                    "Region Method:",
+                    ["Region Growing", "Split-and-Merge (Quadtree)", "Watershed", "Connected Components"]
+                )
+                
+                if region_method == "Region Growing":
+                    st.sidebar.markdown("### Seed Point")
+                    seed_x = st.sidebar.slider("Seed X", 0, original_image.shape[1]-1, original_image.shape[1]//2)
+                    seed_y = st.sidebar.slider("Seed Y", 0, original_image.shape[0]-1, original_image.shape[0]//2)
+                    tolerance = st.sidebar.slider("Intensity Tolerance", 1, 100, 20)
+                    
+                    # Region growing implementation
+                    h, w = original_image.shape
+                    visited = np.zeros((h, w), dtype=bool)
+                    region = np.zeros((h, w), dtype=np.uint8)
+                    seed_intensity = original_image[seed_y, seed_x]
+                    
+                    stack = [(seed_y, seed_x)]
+                    
+                    while stack:
+                        y, x = stack.pop()
+                        if y < 0 or y >= h or x < 0 or x >= w:
+                            continue
+                        if visited[y, x]:
+                            continue
+                        if abs(int(original_image[y, x]) - int(seed_intensity)) > tolerance:
+                            continue
+                        
+                        visited[y, x] = True
+                        region[y, x] = 255
+                        
+                        # 8-connectivity
+                        for dy in [-1, 0, 1]:
+                            for dx in [-1, 0, 1]:
+                                if dy != 0 or dx != 0:
+                                    stack.append((y + dy, x + dx))
+                    
+                    processed_image = region
+                    # Mark seed point
+                    cv2.circle(processed_image, (seed_x, seed_y), 5, 128, -1)
+                    st.sidebar.success(f"Seed at ({seed_x}, {seed_y}), intensity={seed_intensity}")
+                    st.sidebar.info("Grows region from seed by adding similar neighbors.")
+                    
+                elif region_method == "Split-and-Merge (Quadtree)":
+                    # Simplified split-and-merge
+                    std_threshold = st.sidebar.slider("Uniformity Threshold (Std Dev)", 5, 100, 30)
+                    min_size = st.sidebar.slider("Minimum Region Size", 4, 64, 8)
+                    
+                    def split_merge(img, threshold, min_sz):
+                        h, w = img.shape
+                        result = np.zeros_like(img)
+                        
+                        def process_region(y1, y2, x1, x2):
+                            region = img[y1:y2, x1:x2]
+                            if region.size == 0:
+                                return
+                            
+                            std = np.std(region)
+                            
+                            # If uniform or too small, fill with mean
+                            if std < threshold or (y2 - y1) <= min_sz or (x2 - x1) <= min_sz:
+                                result[y1:y2, x1:x2] = np.mean(region)
+                            else:
+                                # Split into 4 quadrants
+                                my, mx = (y1 + y2) // 2, (x1 + x2) // 2
+                                process_region(y1, my, x1, mx)  # Top-left
+                                process_region(y1, my, mx, x2)  # Top-right
+                                process_region(my, y2, x1, mx)  # Bottom-left
+                                process_region(my, y2, mx, x2)  # Bottom-right
+                        
+                        process_region(0, h, 0, w)
+                        return result
+                    
+                    processed_image = split_merge(original_image, std_threshold, min_size).astype(np.uint8)
+                    st.sidebar.info("Recursively splits non-uniform regions, fills uniform ones with mean.")
+                    
+                elif region_method == "Watershed":
+                    # Watershed segmentation
+                    st.sidebar.markdown("### Watershed Parameters")
+                    blur_size = st.sidebar.slider("Pre-blur Size", 1, 15, 5, step=2)
+                    dist_thresh = st.sidebar.slider("Distance Threshold (%)", 10, 90, 50)
+                    
+                    # Preprocess
+                    blurred = cv2.GaussianBlur(original_image, (blur_size, blur_size), 0)
+                    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                    
+                    # Distance transform
+                    dist_transform = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
+                    _, sure_fg = cv2.threshold(dist_transform, dist_thresh/100 * dist_transform.max(), 255, 0)
+                    sure_fg = np.uint8(sure_fg)
+                    
+                    # Sure background
+                    kernel = np.ones((3, 3), np.uint8)
+                    sure_bg = cv2.dilate(binary, kernel, iterations=3)
+                    
+                    # Unknown region
+                    unknown = cv2.subtract(sure_bg, sure_fg)
+                    
+                    # Marker labelling
+                    _, markers = cv2.connectedComponents(sure_fg)
+                    markers = markers + 1
+                    markers[unknown == 255] = 0
+                    
+                    # Apply watershed
+                    img_color = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR)
+                    markers = cv2.watershed(img_color, markers)
+                    
+                    # Create output
+                    processed_image = np.zeros_like(original_image)
+                    processed_image[markers == -1] = 255  # Boundaries
+                    
+                    # Also show regions in different intensities
+                    for i in range(2, markers.max() + 1):
+                        processed_image[markers == i] = (i * 40) % 256
+                    
+                    st.sidebar.info("Treats image as topography, finds watershed lines.")
+                    
+                elif region_method == "Connected Components":
+                    # Connected components labeling
+                    thresh_val = st.sidebar.slider("Binary Threshold", 0, 255, 127)
+                    connectivity = st.sidebar.selectbox("Connectivity:", [4, 8])
+                    
+                    _, binary = cv2.threshold(original_image, thresh_val, 255, cv2.THRESH_BINARY)
+                    
+                    num_labels, labels = cv2.connectedComponents(binary, connectivity=connectivity)
+                    
+                    # Create colored output
+                    processed_image = np.zeros_like(original_image)
+                    for i in range(1, num_labels):
+                        processed_image[labels == i] = (i * 37) % 256  # Assign different intensities
+                    
+                    st.sidebar.success(f"Found **{num_labels - 1}** connected components")
+                    st.sidebar.info(f"Labels objects using {connectivity}-connectivity.")
+
     # --- Display Result ---
     with col2:
         st.subheader("Processed Image")
@@ -968,7 +1414,7 @@ else:
     st.markdown("---")
     st.header("🎯 What You Can Learn")
     
-    feature_cols = st.columns(4)
+    feature_cols = st.columns(5)
     with feature_cols[0]:
         st.markdown("### 1️⃣ Intensity")
         st.markdown("""
@@ -1004,4 +1450,13 @@ else:
         - Skeletonization
         - Boundary Extract
         - Hit-or-Miss
+        """)
+    with feature_cols[4]:
+        st.markdown("### 5️⃣ Segmentation")
+        st.markdown("""
+        - Global/Adaptive Threshold
+        - Otsu's Method
+        - Canny/Sobel Edge
+        - Region Growing
+        - Watershed
         """)

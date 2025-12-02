@@ -177,83 +177,150 @@ if uploaded_file is not None:
     # ==========================================
     elif operation_type == "Neighborhood (Spatial Filtering) Operations":
         st.sidebar.subheader("Spatial Filtering")
-        filter_category = st.sidebar.radio("Filter Type:", ("Smoothing (Low Pass)", "Sharpening (High Pass)"))
+        filter_category = st.sidebar.radio(
+            "Filter Category:", 
+            ("Smoothing Spatial Filters (Linear)", 
+             "Ordered-Statistic Filters (Nonlinear)", 
+             "Sharpening Spatial Filters")
+        )
         
-        if filter_category == "Smoothing (Low Pass)":
-            smooth_type = st.sidebar.selectbox("Method:", ["Averaging (Box)", "Gaussian", "Median"])
+        # --- 1. Smoothing Spatial Filters (Linear) ---
+        if filter_category == "Smoothing Spatial Filters (Linear)":
+            smooth_type = st.sidebar.selectbox(
+                "Method:", 
+                ["Box (Averaging) Filter", "Weighted Averaging Filter", "Gaussian Smoothing Filter"]
+            )
             k_size = st.sidebar.slider("Kernel Size (must be odd)", 3, 15, 3, step=2)
             
-            if smooth_type == "Averaging (Box)":
+            if smooth_type == "Box (Averaging) Filter":
                 processed_image = cv2.blur(original_image, (k_size, k_size))
-            elif smooth_type == "Gaussian":
-                processed_image = cv2.GaussianBlur(original_image, (k_size, k_size), 0)
-            elif smooth_type == "Median":
-                processed_image = cv2.medianBlur(original_image, k_size)
+                st.sidebar.info("Uniform weights. Smooths image but blurs edges.")
                 
-        elif filter_category == "Sharpening (High Pass)":
-            sharp_type = st.sidebar.selectbox("Method:", ["Laplacian", "Sobel", "Prewitt", "High-boost"])
+            elif smooth_type == "Weighted Averaging Filter":
+                # Approximation of Gaussian using integer weights
+                if k_size == 3:
+                    kernel = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=np.float32) / 16.0
+                    processed_image = cv2.filter2D(original_image, -1, kernel)
+                    st.sidebar.info("3x3 Weighted Average Kernel applied.")
+                else:
+                    st.sidebar.warning("Specific Weighted Average matrix is typically defined for 3x3. Using GaussianBlur for larger sizes.")
+                    processed_image = cv2.GaussianBlur(original_image, (k_size, k_size), 0)
+
+            elif smooth_type == "Gaussian Smoothing Filter":
+                sigma = st.sidebar.slider("Sigma (σ)", 0.1, 10.0, 1.0)
+                processed_image = cv2.GaussianBlur(original_image, (k_size, k_size), sigma)
+                st.sidebar.info("True Gaussian distribution. Best for noise reduction while preserving edges better than Box.")
+
+        # --- 2. Ordered-Statistic Filters (Nonlinear) ---
+        elif filter_category == "Ordered-Statistic Filters (Nonlinear)":
+            stat_type = st.sidebar.selectbox(
+                "Method:", 
+                ["Median Filter", "Max Filter", "Min Filter", "Midpoint Filter"]
+            )
+            k_size = st.sidebar.slider("Kernel Size (must be odd)", 3, 15, 3, step=2)
             
-            if sharp_type == "Laplacian":
-                # Laplacian can produce negative values, so use CV_64F then abs
-                lap = cv2.Laplacian(original_image, cv2.CV_64F)
+            if stat_type == "Median Filter":
+                processed_image = cv2.medianBlur(original_image, k_size)
+                st.sidebar.info("Replaces pixel with median of neighbors. Best for Salt & Pepper noise.")
+                
+            elif stat_type == "Max Filter":
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
+                processed_image = cv2.dilate(original_image, kernel)
+                st.sidebar.info("Replaces pixel with max of neighbors. Removes pepper noise (brightens).")
+                
+            elif stat_type == "Min Filter":
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
+                processed_image = cv2.erode(original_image, kernel)
+                st.sidebar.info("Replaces pixel with min of neighbors. Removes salt noise (darkens).")
+                
+            elif stat_type == "Midpoint Filter":
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
+                max_img = cv2.dilate(original_image, kernel)
+                min_img = cv2.erode(original_image, kernel)
+                # Midpoint = (Max + Min) / 2
+                processed_image = ((max_img.astype(np.float32) + min_img.astype(np.float32)) / 2.0).astype(np.uint8)
+                st.sidebar.info("Average of Max and Min in the window. Good for random noise (Gaussian/Uniform).")
+
+        # --- 3. Sharpening Spatial Filters ---
+        elif filter_category == "Sharpening Spatial Filters":
+            sharp_cat = st.sidebar.radio("Sharpening Type:", 
+                ("First-Order Derivative (Gradient)", "Second-Order Derivative (Laplacian)", "General Sharpening"))
+            
+            if sharp_cat == "First-Order Derivative (Gradient)":
+                grad_type = st.sidebar.selectbox("Operator:", ["Sobel", "Prewitt"])
+                
+                if grad_type == "Sobel":
+                    k_size = st.sidebar.slider("Kernel Size", 3, 7, 3, step=2)
+                    axis = st.sidebar.radio("Direction", ("X", "Y", "Combined"))
+                    
+                    sobelx = cv2.Sobel(original_image, cv2.CV_64F, 1, 0, ksize=k_size)
+                    sobely = cv2.Sobel(original_image, cv2.CV_64F, 0, 1, ksize=k_size)
+                    
+                    if axis == "X":
+                        processed_image = np.uint8(np.absolute(sobelx))
+                    elif axis == "Y":
+                        processed_image = np.uint8(np.absolute(sobely))
+                    else:
+                        combined = cv2.magnitude(sobelx, sobely)
+                        processed_image = np.uint8(cv2.normalize(combined, None, 0, 255, cv2.NORM_MINMAX))
+                    st.sidebar.info("Sobel: Smooths slightly then computes derivative. Good noise immunity.")
+
+                elif grad_type == "Prewitt":
+                    # Prewitt kernels
+                    kernelx = np.array([[1,1,1],[0,0,0],[-1,-1,-1]])
+                    kernely = np.array([[-1,0,1],[-1,0,1],[-1,0,1]])
+                    
+                    img_prewittx = cv2.filter2D(original_image, -1, kernelx)
+                    img_prewitty = cv2.filter2D(original_image, -1, kernely)
+                    
+                    # Combine magnitude
+                    processed_image = cv2.addWeighted(np.abs(img_prewittx), 0.5, np.abs(img_prewitty), 0.5, 0)
+                    st.sidebar.info("Prewitt: Simple derivative masks. Detects edges.")
+
+            elif sharp_cat == "Second-Order Derivative (Laplacian)":
+                k_size = st.sidebar.slider("Kernel Size", 1, 7, 3, step=2)
+                # Laplacian
+                lap = cv2.Laplacian(original_image, cv2.CV_64F, ksize=k_size)
                 lap = np.uint8(np.absolute(lap))
-                # Often added back to original to sharpen
-                add_back = st.sidebar.checkbox("Add back to original (Sharpened Image)", value=True)
-                if add_back:
-                    # Simple sharpening: Original - Laplacian (depending on kernel center sign)
-                    # Standard 3x3 Laplacian has -4 center, so we subtract. 
-                    # Or if center is positive, we add. 
-                    # Let's just show the Laplacian edges or the enhanced image.
-                    processed_image = cv2.addWeighted(original_image, 1, lap, 1, 0) # Simple addition
-                else:
+                
+                mode = st.sidebar.radio("Output Mode:", ("Laplacian Edges Only", "Sharpened Image (Original + Laplacian)"))
+                
+                if mode == "Laplacian Edges Only":
                     processed_image = lap
-
-            elif sharp_type == "Sobel":
-                axis = st.sidebar.radio("Direction", ("X", "Y", "Combined"))
-                k_size = st.sidebar.slider("Kernel Size", 3, 7, 3, step=2)
-                
-                sobelx = cv2.Sobel(original_image, cv2.CV_64F, 1, 0, ksize=k_size)
-                sobely = cv2.Sobel(original_image, cv2.CV_64F, 0, 1, ksize=k_size)
-                
-                if axis == "X":
-                    processed_image = np.uint8(np.absolute(sobelx))
-                elif axis == "Y":
-                    processed_image = np.uint8(np.absolute(sobely))
                 else:
-                    combined = cv2.magnitude(sobelx, sobely)
-                    processed_image = np.uint8(cv2.normalize(combined, None, 0, 255, cv2.NORM_MINMAX))
+                    processed_image = cv2.addWeighted(original_image, 1, lap, 1, 0)
+                st.sidebar.info("Laplacian: Isotropic (rotation invariant). Detects discontinuities.")
 
-            elif sharp_type == "Prewitt":
-                # Prewitt kernels
-                kernelx = np.array([[1,1,1],[0,0,0],[-1,-1,-1]])
-                kernely = np.array([[-1,0,1],[-1,0,1],[-1,0,1]])
+            elif sharp_cat == "General Sharpening":
+                gen_type = st.sidebar.selectbox("Method:", ["Unsharp Masking", "High-boost Filtering"])
                 
-                img_prewittx = cv2.filter2D(original_image, -1, kernelx)
-                img_prewitty = cv2.filter2D(original_image, -1, kernely)
+                k_size = st.sidebar.slider("Blur Kernel Size", 3, 15, 3, step=2)
+                sigma = st.sidebar.slider("Blur Sigma", 1.0, 10.0, 1.0)
                 
-                processed_image = img_prewittx + img_prewitty
-
-            elif sharp_type == "High-boost":
-                # Highboost = A * Original - LowPass
-                # Highboost = (A-1) * Original + HighPass
-                A = st.sidebar.slider("Amplification Factor (A)", 1.0, 5.0, 1.2)
-                k_size = 3
-                blurred = cv2.GaussianBlur(original_image, (k_size, k_size), 0)
-                
-                # Mask = Original - Blurred
+                blurred = cv2.GaussianBlur(original_image, (k_size, k_size), sigma)
                 mask = original_image.astype(float) - blurred.astype(float)
                 
-                # Result = Original + k * Mask
-                # If A is used as boost factor: Result = A * Original - Blurred ? 
-                # Standard formula: g(x,y) = f(x,y) + k * g_mask(x,y)
-                # where g_mask = f(x,y) - f_blur(x,y)
-                # So g = f + k(f - f_blur) = (1+k)f - k*f_blur
-                # Let's use the slider as 'k' (boost factor)
-                
-                k = A # Using A as the boost coefficient
-                
-                highboost = original_image.astype(float) + k * mask
-                processed_image = np.clip(highboost, 0, 255).astype(np.uint8)
+                if gen_type == "Unsharp Masking":
+                    k = 1.0
+                    st.sidebar.info("Formula: Sharpened = Original + (Original - Blurred)")
+                else:
+                    # High-boost
+                    A = st.sidebar.slider("Amplification Factor (A)", 1.1, 5.0, 1.2)
+                    # High-boost = A * Original - Blurred
+                    #            = (A-1)*Original + Original - Blurred
+                    #            = (A-1)*Original + Mask
+                    # This is one interpretation. Another is k * Mask.
+                    # Let's use the formula: High-boost = A * Original - Blurred
+                    k = 1.0 # Placeholder, we calculate directly below
+                    
+                if gen_type == "High-boost Filtering":
+                    # Formula: A * Original - Blurred
+                    sharpened = A * original_image.astype(float) - blurred.astype(float)
+                else:
+                    # Unsharp Masking: Original + Mask
+                    sharpened = original_image.astype(float) + mask
+
+                processed_image = np.clip(sharpened, 0, 255).astype(np.uint8)
 
 
     # --- Display Result ---

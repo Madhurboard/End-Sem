@@ -2,37 +2,189 @@ import streamlit as st
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+from io import BytesIO
+import base64
+from PIL import Image
+import urllib.request
 
 # Set page config
-st.set_page_config(page_title="Interactive DIP Tool", layout="wide")
+st.set_page_config(page_title="🎓 DIP Learning Tool", layout="wide", initial_sidebar_state="expanded")
 
-st.title("🖼️ Interactive Digital Image Processing Tool")
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
+
+# Sample images from the web
+SAMPLE_IMAGES = {
+    "Lena (Standard)": "https://upload.wikimedia.org/wikipedia/en/7/7d/Lenna_%28test_image%29.png",
+    "Cameraman": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Cameraman.tif/lossy-page1-256px-Cameraman.tif.jpg",
+    "Peppers": "https://upload.wikimedia.org/wikipedia/en/8/8c/PSR_B1509-58_-_Chandra_X-ray_Observatory.jpg",
+    "Moon (Astronomy)": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/FullMoon2010.jpg/280px-FullMoon2010.jpg",
+}
+
+@st.cache_data
+def load_sample_image(url):
+    """Load image from URL"""
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            image_data = response.read()
+        nparr = np.frombuffer(image_data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+        if img is not None:
+            # Resize to reasonable size
+            if max(img.shape) > 512:
+                scale = 512 / max(img.shape)
+                img = cv2.resize(img, None, fx=scale, fy=scale)
+        return img
+    except Exception as e:
+        return None
+
+def add_noise(image, noise_type, amount):
+    """Add noise to image for testing filters"""
+    noisy = image.copy().astype(np.float32)
+    
+    if noise_type == "Salt & Pepper":
+        prob = amount / 100
+        # Salt
+        salt = np.random.random(image.shape) < prob / 2
+        noisy[salt] = 255
+        # Pepper
+        pepper = np.random.random(image.shape) < prob / 2
+        noisy[pepper] = 0
+        
+    elif noise_type == "Gaussian":
+        sigma = amount
+        gaussian = np.random.normal(0, sigma, image.shape)
+        noisy = noisy + gaussian
+        
+    elif noise_type == "Speckle":
+        speckle = np.random.randn(*image.shape) * amount
+        noisy = noisy + noisy * speckle / 100
+        
+    elif noise_type == "Poisson":
+        # Scale, add poisson, scale back
+        vals = len(np.unique(image))
+        vals = 2 ** np.ceil(np.log2(vals))
+        noisy = np.random.poisson(noisy * vals / 256) / vals * 256
+    
+    return np.clip(noisy, 0, 255).astype(np.uint8)
+
+def calculate_metrics(original, processed):
+    """Calculate image quality metrics"""
+    # Ensure same shape
+    if original.shape != processed.shape:
+        return None
+    
+    orig = original.astype(np.float64)
+    proc = processed.astype(np.float64)
+    
+    # MSE
+    mse = np.mean((orig - proc) ** 2)
+    
+    # PSNR
+    if mse == 0:
+        psnr = float('inf')
+    else:
+        psnr = 10 * np.log10((255 ** 2) / mse)
+    
+    # SSIM (simplified version)
+    mu_x = np.mean(orig)
+    mu_y = np.mean(proc)
+    sigma_x = np.std(orig)
+    sigma_y = np.std(proc)
+    sigma_xy = np.mean((orig - mu_x) * (proc - mu_y))
+    
+    C1 = (0.01 * 255) ** 2
+    C2 = (0.03 * 255) ** 2
+    
+    ssim = ((2 * mu_x * mu_y + C1) * (2 * sigma_xy + C2)) / \
+           ((mu_x ** 2 + mu_y ** 2 + C1) * (sigma_x ** 2 + sigma_y ** 2 + C2))
+    
+    return {'MSE': mse, 'PSNR': psnr, 'SSIM': ssim}
+
+def get_image_download_link(img, filename="processed_image.png"):
+    """Generate download link for image"""
+    _, buffer = cv2.imencode('.png', img)
+    b64 = base64.b64encode(buffer).decode()
+    return f'<a href="data:image/png;base64,{b64}" download="{filename}">📥 Download Processed Image</a>'
+
+st.title("🎓 Interactive Digital Image Processing Learning Tool")
 st.markdown("""
-This tool allows you to apply various **Spatial Domain Operations** on images.
-Choose between **Intensity Transformations** and **Neighborhood Operations**.
+Learn and experiment with **Digital Image Processing** techniques interactively!
+- 📊 **Intensity Transformations** - Point operations on individual pixels
+- 🔲 **Spatial Filtering** - Neighborhood operations using kernels
+- 📈 **Frequency Domain** - Fourier transform based filtering  
+- 🔷 **Morphological Operations** - Shape-based binary operations
 """)
 
-# --- Sidebar: Image Upload ---
-st.sidebar.header("1. Upload Image")
-uploaded_file = st.sidebar.file_uploader("Choose an image...", type=["jpg", "jpeg", "png", "bmp", "tif"])
+# --- Sidebar: Image Source Selection ---
+st.sidebar.header("📷 1. Image Source")
+image_source = st.sidebar.radio("Choose image source:", ["Upload Your Image", "Use Sample Image", "Generate Test Pattern"])
 
-def load_image(uploaded_file):
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE) # Load as grayscale for DIP basics
-    return img
+original_image = None
 
-if uploaded_file is not None:
-    original_image = load_image(uploaded_file)
-    
+if image_source == "Upload Your Image":
+    uploaded_file = st.sidebar.file_uploader("Choose an image...", type=["jpg", "jpeg", "png", "bmp", "tif"])
+    if uploaded_file is not None:
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+        original_image = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+        
+elif image_source == "Use Sample Image":
+    sample_choice = st.sidebar.selectbox("Select sample image:", list(SAMPLE_IMAGES.keys()))
+    with st.spinner(f"Loading {sample_choice}..."):
+        original_image = load_sample_image(SAMPLE_IMAGES[sample_choice])
     if original_image is None:
-        st.error("Error loading image. Please upload a valid image file.")
-        st.stop()
+        st.sidebar.warning("Could not load sample image. Please upload your own.")
+        
+elif image_source == "Generate Test Pattern":
+    pattern_type = st.sidebar.selectbox("Pattern type:", ["Gradient", "Checkerboard", "Circles", "Text"])
+    size = 256
+    if pattern_type == "Gradient":
+        original_image = np.tile(np.arange(256, dtype=np.uint8), (256, 1))
+    elif pattern_type == "Checkerboard":
+        original_image = np.zeros((size, size), dtype=np.uint8)
+        original_image[::16, ::16] = 255
+        original_image = cv2.resize(np.kron(np.indices((8, 8)).sum(axis=0) % 2, np.ones((32, 32))).astype(np.uint8) * 255, (size, size))
+    elif pattern_type == "Circles":
+        original_image = np.zeros((size, size), dtype=np.uint8)
+        for r in range(20, 120, 20):
+            cv2.circle(original_image, (size//2, size//2), r, 255, 2)
+    elif pattern_type == "Text":
+        original_image = np.zeros((size, size), dtype=np.uint8)
+        cv2.putText(original_image, "DIP", (40, 150), cv2.FONT_HERSHEY_SIMPLEX, 3, 255, 5)
+        cv2.putText(original_image, "Tool", (50, 220), cv2.FONT_HERSHEY_SIMPLEX, 2, 128, 3)
+
+# --- Noise Addition Section ---
+if original_image is not None:
+    st.sidebar.markdown("---")
+    st.sidebar.header("🔊 Add Noise (Optional)")
+    add_noise_toggle = st.sidebar.checkbox("Add noise to test filters")
+    
+    if add_noise_toggle:
+        noise_type = st.sidebar.selectbox("Noise Type:", ["Salt & Pepper", "Gaussian", "Speckle", "Poisson"])
+        if noise_type == "Salt & Pepper":
+            noise_amount = st.sidebar.slider("Noise Probability (%)", 1, 50, 10)
+        elif noise_type == "Gaussian":
+            noise_amount = st.sidebar.slider("Sigma (std dev)", 5, 100, 25)
+        elif noise_type == "Speckle":
+            noise_amount = st.sidebar.slider("Speckle Amount", 10, 100, 30)
+        else:
+            noise_amount = 1
+        
+        original_image = add_noise(original_image, noise_type, noise_amount)
+        st.sidebar.success(f"✅ Added {noise_type} noise")
+
+if original_image is not None:
     
     # Display Original Image
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Original Image (Grayscale)")
         st.image(original_image, use_container_width=True, clamp=True, channels='GRAY')
+        
+        # Image info
+        st.caption(f"Size: {original_image.shape[1]}×{original_image.shape[0]} | Range: [{original_image.min()}-{original_image.max()}]")
         
         # Histogram of original
         if st.checkbox("Show Original Histogram"):
@@ -41,7 +193,8 @@ if uploaded_file is not None:
             st.pyplot(fig)
 
     # --- Sidebar: Operation Selection ---
-    st.sidebar.header("2. Select Learning Module")
+    st.sidebar.markdown("---")
+    st.sidebar.header("🎛️ 2. Select Learning Module")
     operation_type = st.sidebar.radio(
         "Choose Module:",
         (
@@ -59,15 +212,37 @@ if uploaded_file is not None:
     # ==========================================
     if "Intensity" in operation_type:
         st.header("1. Intensity Transformations")
-        tab_vis, tab_theory = st.tabs(["🎨 Visualization", "📖 Theory"])
+        tab_vis, tab_theory = st.tabs(["🎨 Interactive Lab", "📖 Theory & Formulas"])
         
         with tab_theory:
             st.markdown(r"""
-            ### Intensity Transformations
-            These operations work on individual pixels: $s = T(r)$
-            - **r**: Input intensity
-            - **s**: Output intensity
-            - **T**: Transformation function
+            ## 📚 Intensity Transformations (Point Operations)
+            
+            ### Concept
+            These operations modify pixel values **individually** without considering neighbors.
+            
+            **General Formula:** $s = T(r)$
+            - $r$ = Input pixel intensity (0-255)
+            - $s$ = Output pixel intensity
+            - $T$ = Transformation function
+            
+            ---
+            
+            ### 🔢 Available Transformations
+            
+            | Transformation | Formula | Use Case |
+            |---------------|---------|----------|
+            | **Negative** | $s = L-1-r$ | Enhance white details in dark regions |
+            | **Log** | $s = c \cdot \log(1+r)$ | Expand dark values, compress bright |
+            | **Power-law (Gamma)** | $s = c \cdot r^\gamma$ | Correct display gamma, enhance contrast |
+            | **Contrast Stretch** | Piecewise linear | Expand limited range to full 0-255 |
+            
+            ---
+            
+            ### 💡 Tips
+            - **γ < 1**: Brightens dark regions (screen correction)
+            - **γ > 1**: Darkens image (printer correction)
+            - **Log transform**: Great for images with large dynamic range (e.g., Fourier spectrum)
             """)
             
         with tab_vis:
@@ -107,7 +282,7 @@ if uploaded_file is not None:
                 
                 s_values = c * np.log(1 + r_values)
                 s_values = np.clip(s_values, 0, 255)
-                st.sidebar.info("Formula: $s = c \cdot \log(1 + r)$")
+                st.sidebar.info(r"Formula: $s = c \cdot \log(1 + r)$")
 
             elif transform_mode == "Inverse Log Transformation":
                 c = st.sidebar.slider("Constant (c)", 0.0, 5.0, 1.0)
@@ -117,7 +292,7 @@ if uploaded_file is not None:
                 
                 s_values = c * (np.exp(r_values/255.0) - 1) * 255
                 s_values = np.clip(s_values, 0, 255)
-                st.sidebar.info("Formula: $s = c \cdot (e^r - 1)$")
+                st.sidebar.info(r"Formula: $s = c \cdot (e^r - 1)$")
 
             elif transform_mode == "Power-law (Gamma) Transform":
                 gamma = st.sidebar.slider("Gamma (γ)", 0.1, 5.0, 1.0, 0.1)
@@ -130,7 +305,7 @@ if uploaded_file is not None:
                 s_values = c * np.power(r_values/255.0, gamma) * 255
                 s_values = np.clip(s_values, 0, 255)
                 
-                st.sidebar.info(f"Formula: $s = c \cdot r^{{\gamma}}$")
+                st.sidebar.info(r"Formula: $s = c \cdot r^{\gamma}$")
 
             elif transform_mode == "Contrast Stretching":
                 st.sidebar.text("Define points (r1, s1) and (r2, s2)")
@@ -192,8 +367,58 @@ if uploaded_file is not None:
     # 2. NEIGHBORHOOD / SPATIAL FILTERING
     # ==========================================
     elif "Spatial Filtering" in operation_type:
-        st.header("2. Spatial Filtering")
-        st.sidebar.subheader("Spatial Filtering")
+        st.header("2. Spatial Filtering (Neighborhood Operations)")
+        
+        tab_vis2, tab_theory2 = st.tabs(["🔬 Interactive Lab", "📖 Theory & Kernels"])
+        
+        with tab_theory2:
+            st.markdown(r"""
+            ## 📚 Spatial Filtering
+            
+            ### Concept
+            Unlike point operations, spatial filters use a **neighborhood** of pixels.
+            A small matrix called a **kernel/mask** slides over the image.
+            
+            **Operation:** $g(x,y) = \sum_{s=-a}^{a} \sum_{t=-b}^{b} w(s,t) \cdot f(x+s, y+t)$
+            
+            ---
+            
+            ### 🔲 Common Kernels
+            
+            **Box (Averaging) Filter 3×3:**
+            ```
+            1/9  1/9  1/9
+            1/9  1/9  1/9
+            1/9  1/9  1/9
+            ```
+            
+            **Gaussian 3×3:**
+            ```
+            1/16  2/16  1/16
+            2/16  4/16  2/16
+            1/16  2/16  1/16
+            ```
+            
+            **Laplacian (Edge Detection):**
+            ```
+             0  -1   0
+            -1   4  -1
+             0  -1   0
+            ```
+            
+            ---
+            
+            ### 📊 Filter Types
+            
+            | Type | Purpose | Example |
+            |------|---------|---------|
+            | **Smoothing (LPF)** | Blur, noise reduction | Box, Gaussian |
+            | **Sharpening (HPF)** | Edge enhancement | Laplacian, Sobel |
+            | **Order-Statistic** | Nonlinear filtering | Median (salt & pepper) |
+            """)
+        
+        with tab_vis2:
+            st.sidebar.subheader("Spatial Filtering")
         filter_category = st.sidebar.radio(
             "Filter Category:", 
             ("Smoothing Spatial Filters (Linear)", 
@@ -523,98 +748,260 @@ if uploaded_file is not None:
     # ==========================================
     elif "Morphological" in operation_type:
         st.header("4. Morphological Operations")
-        st.sidebar.subheader("Morphological Operations")
         
-        # Thresholding for binary operations
-        st.sidebar.markdown("### Pre-processing")
-        is_binary = st.sidebar.checkbox("Convert to Binary first?", value=True)
-        if is_binary:
-            thresh_val = st.sidebar.slider("Threshold Value", 0, 255, 127)
-            _, working_image = cv2.threshold(original_image, thresh_val, 255, cv2.THRESH_BINARY)
-            st.image(working_image, caption="Binary Input", width=200)
-        else:
-            working_image = original_image
+        tab_vis4, tab_theory4 = st.tabs(["🔬 Interactive Lab", "📖 Theory"])
+        
+        with tab_theory4:
+            st.markdown(r"""
+            ## 📚 Morphological Operations
             
-        morph_cat = st.sidebar.selectbox(
-            "Category:",
-            ["Basic Morphology", "Combined Operations", "Advanced Transformations", "Boundary Extraction"]
-        )
-        
-        k_size = st.sidebar.slider("Structuring Element Size", 3, 21, 3, step=2)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
-        
-        if morph_cat == "Basic Morphology":
-            op = st.sidebar.radio("Operation:", ["Dilation", "Erosion"])
-            if op == "Dilation":
-                processed_image = cv2.dilate(working_image, kernel, iterations=1)
-                st.sidebar.info("Expands white regions. Fills holes.")
-            else:
-                processed_image = cv2.erode(working_image, kernel, iterations=1)
-                st.sidebar.info("Shrinks white regions. Removes small objects.")
-                
-        elif morph_cat == "Combined Operations":
-            op = st.sidebar.radio("Operation:", ["Opening", "Closing"])
-            if op == "Opening":
-                # Erosion followed by Dilation
-                processed_image = cv2.morphologyEx(working_image, cv2.MORPH_OPEN, kernel)
-                st.sidebar.info("Removes small objects (noise) from foreground.")
-            else:
-                # Dilation followed by Erosion
-                processed_image = cv2.morphologyEx(working_image, cv2.MORPH_CLOSE, kernel)
-                st.sidebar.info("Fills small holes in foreground objects.")
-                
-        elif morph_cat == "Advanced Transformations":
-            adv_op = st.sidebar.selectbox("Operation:", 
-                ["Hit-or-Miss", "Morphological Gradient", "Top Hat", "Black Hat", "Skeletonization", "Convex Hull"])
+            ### Concept
+            Morphological operations work on **binary images** using a **structuring element (SE)**.
+            They analyze and modify geometric structures in images.
             
-            if adv_op == "Hit-or-Miss":
-                st.sidebar.warning("Hit-or-Miss requires a specific kernel to find a pattern. Using a simple cross kernel for demo.")
-                # Define a simple kernel for hit-or-miss (finding corners/isolated pixels etc)
-                hm_kernel = np.array([[0, 1, 0], [1, -1, 1], [0, 1, 0]], dtype=np.int8)
-                processed_image = cv2.morphologyEx(working_image, cv2.MORPH_HITMISS, hm_kernel)
+            ---
+            
+            ### 🔷 Basic Operations
+            
+            | Operation | Symbol | Effect |
+            |-----------|--------|--------|
+            | **Dilation** | $A \oplus B$ | Expands/grows white regions |
+            | **Erosion** | $A \ominus B$ | Shrinks white regions |
+            
+            ---
+            
+            ### 🔶 Combined Operations
+            
+            | Operation | Formula | Use Case |
+            |-----------|---------|----------|
+            | **Opening** | $(A \ominus B) \oplus B$ | Remove small bright spots (noise) |
+            | **Closing** | $(A \oplus B) \ominus B$ | Fill small dark holes |
+            
+            ---
+            
+            ### 📐 Structuring Element
+            The SE is a small shape (rectangle, cross, ellipse) that probes the image.
+            - **Origin**: Usually the center pixel
+            - **Size**: Controls the scale of the operation
+            
+            ### 💡 Applications
+            - Noise removal
+            - Object counting (connected components)
+            - Boundary extraction
+            - Skeleton extraction
+            - Document image cleanup
+            """)
+        
+        with tab_vis4:
+            st.sidebar.subheader("Morphological Operations")
+            
+            # Thresholding for binary operations
+            st.sidebar.markdown("### Pre-processing")
+            is_binary = st.sidebar.checkbox("Convert to Binary first?", value=True)
+            if is_binary:
+                thresh_val = st.sidebar.slider("Threshold Value", 0, 255, 127)
+                _, working_image = cv2.threshold(original_image, thresh_val, 255, cv2.THRESH_BINARY)
+                st.sidebar.image(working_image, caption="Binary Input", width=150)
+            else:
+                working_image = original_image
                 
-            elif adv_op == "Morphological Gradient":
-                processed_image = cv2.morphologyEx(working_image, cv2.MORPH_GRADIENT, kernel)
-                st.sidebar.info("Difference between Dilation and Erosion. Outlines edges.")
+            morph_cat = st.sidebar.selectbox(
+                "Category:",
+                ["Basic Morphology", "Combined Operations", "Advanced Transformations", "Boundary Extraction"]
+            )
+            
+            se_shape = st.sidebar.selectbox("SE Shape:", ["Rectangle", "Ellipse", "Cross"])
+            k_size = st.sidebar.slider("Structuring Element Size", 3, 21, 3, step=2)
+            
+            if se_shape == "Rectangle":
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
+            elif se_shape == "Ellipse":
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+            else:
+                kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (k_size, k_size))
+            
+            # Show SE
+            st.sidebar.markdown("**Structuring Element:**")
+            se_display = (kernel * 255).astype(np.uint8)
+            st.sidebar.image(cv2.resize(se_display, (60, 60), interpolation=cv2.INTER_NEAREST), width=60)
+            
+            if morph_cat == "Basic Morphology":
+                op = st.sidebar.radio("Operation:", ["Dilation", "Erosion"])
+                if op == "Dilation":
+                    processed_image = cv2.dilate(working_image, kernel, iterations=1)
+                    st.sidebar.info("Expands white regions. Fills holes.")
+                else:
+                    processed_image = cv2.erode(working_image, kernel, iterations=1)
+                    st.sidebar.info("Shrinks white regions. Removes small objects.")
+                    
+            elif morph_cat == "Combined Operations":
+                op = st.sidebar.radio("Operation:", ["Opening", "Closing"])
+                if op == "Opening":
+                    # Erosion followed by Dilation
+                    processed_image = cv2.morphologyEx(working_image, cv2.MORPH_OPEN, kernel)
+                    st.sidebar.info("Removes small objects (noise) from foreground.")
+                else:
+                    # Dilation followed by Erosion
+                    processed_image = cv2.morphologyEx(working_image, cv2.MORPH_CLOSE, kernel)
+                    st.sidebar.info("Fills small holes in foreground objects.")
+                    
+            elif morph_cat == "Advanced Transformations":
+                adv_op = st.sidebar.selectbox("Operation:", 
+                    ["Hit-or-Miss", "Morphological Gradient", "Top Hat", "Black Hat", "Skeletonization"])
                 
-            elif adv_op == "Top Hat":
-                processed_image = cv2.morphologyEx(working_image, cv2.MORPH_TOPHAT, kernel)
-                st.sidebar.info("Input image minus Opening. Highlights bright details.")
-                
-            elif adv_op == "Black Hat":
-                processed_image = cv2.morphologyEx(working_image, cv2.MORPH_BLACKHAT, kernel)
-                st.sidebar.info("Closing minus Input image. Highlights dark details.")
-                
-            elif adv_op == "Skeletonization":
-                import skimage.morphology
-                # Skeletonize requires boolean image
-                bool_img = working_image > 0
-                skeleton = skimage.morphology.skeletonize(bool_img)
-                processed_image = (skeleton * 255).astype(np.uint8)
-                st.sidebar.info("Reduces foreground regions to 1-pixel wide skeleton.")
-                
-            elif adv_op == "Convex Hull":
-                import skimage.morphology
-                bool_img = working_image > 0
-                chull = skimage.morphology.convex_hull_image(bool_img)
-                processed_image = (chull * 255).astype(np.uint8)
-                st.sidebar.info("Smallest convex polygon containing the object.")
+                if adv_op == "Hit-or-Miss":
+                    st.sidebar.warning("Hit-or-Miss requires a specific kernel to find a pattern. Using a simple cross kernel for demo.")
+                    # Define a simple kernel for hit-or-miss (finding corners/isolated pixels etc)
+                    hm_kernel = np.array([[0, 1, 0], [1, -1, 1], [0, 1, 0]], dtype=np.int8)
+                    processed_image = cv2.morphologyEx(working_image, cv2.MORPH_HITMISS, hm_kernel)
+                    
+                elif adv_op == "Morphological Gradient":
+                    processed_image = cv2.morphologyEx(working_image, cv2.MORPH_GRADIENT, kernel)
+                    st.sidebar.info("Difference between Dilation and Erosion. Outlines edges.")
+                    
+                elif adv_op == "Top Hat":
+                    processed_image = cv2.morphologyEx(working_image, cv2.MORPH_TOPHAT, kernel)
+                    st.sidebar.info("Input image minus Opening. Highlights bright details.")
+                    
+                elif adv_op == "Black Hat":
+                    processed_image = cv2.morphologyEx(working_image, cv2.MORPH_BLACKHAT, kernel)
+                    st.sidebar.info("Closing minus Input image. Highlights dark details.")
+                    
+                elif adv_op == "Skeletonization":
+                    # Implement skeletonization using OpenCV (Zhang-Suen thinning)
+                    # Since skimage may not be available, use iterative erosion approach
+                    skel = np.zeros(working_image.shape, np.uint8)
+                    temp = working_image.copy()
+                    element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3,3))
+                    
+                    while True:
+                        eroded = cv2.erode(temp, element)
+                        dilated = cv2.dilate(eroded, element)
+                        diff = cv2.subtract(temp, dilated)
+                        skel = cv2.bitwise_or(skel, diff)
+                        temp = eroded.copy()
+                        
+                        if cv2.countNonZero(temp) == 0:
+                            break
+                    
+                    processed_image = skel
+                    st.sidebar.info("Reduces foreground regions to 1-pixel wide skeleton.")
 
-        elif morph_cat == "Boundary Extraction":
-            # Boundary = A - Erosion(A)
-            eroded = cv2.erode(working_image, kernel, iterations=1)
-            processed_image = cv2.subtract(working_image, eroded)
-            st.sidebar.info("Subtracting eroded image from original gives the boundary.")
+            elif morph_cat == "Boundary Extraction":
+                # Boundary = A - Erosion(A)
+                eroded = cv2.erode(working_image, kernel, iterations=1)
+                processed_image = cv2.subtract(working_image, eroded)
+                st.sidebar.info("Subtracting eroded image from original gives the boundary.")
 
     # --- Display Result ---
     with col2:
         st.subheader("Processed Image")
         st.image(processed_image, use_container_width=True, clamp=True, channels='GRAY')
         
+        # Download button
+        st.markdown(get_image_download_link(processed_image), unsafe_allow_html=True)
+        
         if st.checkbox("Show Processed Histogram"):
             fig2, ax2 = plt.subplots()
             ax2.hist(processed_image.ravel(), 256, [0, 256])
             st.pyplot(fig2)
+    
+    # --- Metrics and Comparison Section ---
+    st.markdown("---")
+    st.header("📊 Analysis & Comparison")
+    
+    analysis_tabs = st.tabs(["📈 Image Metrics", "🔍 Difference View", "📊 Histogram Comparison"])
+    
+    with analysis_tabs[0]:
+        metrics = calculate_metrics(original_image, processed_image)
+        if metrics:
+            mcol1, mcol2, mcol3 = st.columns(3)
+            with mcol1:
+                st.metric("MSE", f"{metrics['MSE']:.2f}", help="Mean Squared Error - Lower is more similar")
+            with mcol2:
+                psnr_val = f"{metrics['PSNR']:.2f} dB" if metrics['PSNR'] != float('inf') else "∞ (Identical)"
+                st.metric("PSNR", psnr_val, help="Peak Signal-to-Noise Ratio - Higher is better")
+            with mcol3:
+                st.metric("SSIM", f"{metrics['SSIM']:.4f}", help="Structural Similarity - 1.0 means identical")
+    
+    with analysis_tabs[1]:
+        # Difference image
+        diff = cv2.absdiff(original_image, processed_image)
+        diff_colored = cv2.applyColorMap(diff, cv2.COLORMAP_JET)
+        diff_colored = cv2.cvtColor(diff_colored, cv2.COLOR_BGR2RGB)
+        
+        dcol1, dcol2 = st.columns(2)
+        with dcol1:
+            st.image(diff, caption="Absolute Difference (Grayscale)", use_container_width=True, clamp=True)
+        with dcol2:
+            st.image(diff_colored, caption="Difference Heatmap (Blue=Same, Red=Different)", use_container_width=True)
+    
+    with analysis_tabs[2]:
+        fig_comp, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+        ax1.hist(original_image.ravel(), 256, range=[0, 256], color='blue', alpha=0.7)
+        ax1.set_title("Original Histogram")
+        ax1.set_xlabel("Intensity")
+        ax1.set_ylabel("Frequency")
+        
+        ax2.hist(processed_image.ravel(), 256, range=[0, 256], color='green', alpha=0.7)
+        ax2.set_title("Processed Histogram")
+        ax2.set_xlabel("Intensity")
+        ax2.set_ylabel("Frequency")
+        
+        plt.tight_layout()
+        st.pyplot(fig_comp)
+        
+        # Overlay histogram
+        fig_overlay, ax_overlay = plt.subplots(figsize=(10, 4))
+        ax_overlay.hist(original_image.ravel(), 256, range=[0, 256], color='blue', alpha=0.5, label='Original')
+        ax_overlay.hist(processed_image.ravel(), 256, range=[0, 256], color='green', alpha=0.5, label='Processed')
+        ax_overlay.legend()
+        ax_overlay.set_title("Overlaid Histograms")
+        ax_overlay.set_xlabel("Intensity")
+        ax_overlay.set_ylabel("Frequency")
+        st.pyplot(fig_overlay)
 
 else:
-    st.info("Please upload an image to get started.")
+    st.info("👆 Please select an image source from the sidebar to get started.")
+    
+    # Show feature overview when no image loaded
+    st.markdown("---")
+    st.header("🎯 What You Can Learn")
+    
+    feature_cols = st.columns(4)
+    with feature_cols[0]:
+        st.markdown("### 1️⃣ Intensity")
+        st.markdown("""
+        - Image Negative
+        - Log Transform
+        - Gamma Correction
+        - Contrast Stretching
+        - Bit-plane Slicing
+        """)
+    with feature_cols[1]:
+        st.markdown("### 2️⃣ Spatial")
+        st.markdown("""
+        - Box Filter
+        - Gaussian Blur
+        - Median Filter
+        - Sobel Edge
+        - Laplacian
+        """)
+    with feature_cols[2]:
+        st.markdown("### 3️⃣ Frequency")
+        st.markdown("""
+        - Ideal LPF/HPF
+        - Butterworth
+        - Gaussian Filter
+        - Band-pass
+        - Homomorphic
+        """)
+    with feature_cols[3]:
+        st.markdown("### 4️⃣ Morphology")
+        st.markdown("""
+        - Dilation/Erosion
+        - Opening/Closing
+        - Skeletonization
+        - Boundary Extract
+        - Hit-or-Miss
+        """)

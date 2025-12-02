@@ -41,14 +41,14 @@ if uploaded_file is not None:
             st.pyplot(fig)
 
     # --- Sidebar: Operation Selection ---
-    st.sidebar.header("2. Select Operation Type")
+    st.sidebar.header("2. Select Learning Module")
     operation_type = st.sidebar.radio(
-        "Choose Domain:",
+        "Choose Module:",
         (
-            "Intensity (Point) Transformations", 
-            "Neighborhood (Spatial Filtering) Operations",
-            "Frequency Domain Filtering",
-            "Morphological Operations"
+            "1. Intensity Transformations (Point)", 
+            "2. Spatial Filtering (Neighborhood)",
+            "3. Frequency Domain (Fourier)",
+            "4. Morphological Operations (Shape)"
         )
     )
 
@@ -57,130 +57,142 @@ if uploaded_file is not None:
     # ==========================================
     # 1. INTENSITY / POINT TRANSFORMATIONS
     # ==========================================
-    if operation_type == "Intensity (Point) Transformations":
-        st.sidebar.subheader("Intensity Transformations")
-        transform_mode = st.sidebar.selectbox(
-            "Select Transformation:",
-            [
-                "Image Negative",
-                "Log Transformation",
-                "Inverse Log Transformation",
-                "Power-law (Gamma) Transform",
-                "Contrast Stretching",
-                "Gray-level Slicing",
-                "Bit-plane Slicing"
-            ]
-        )
+    if "Intensity" in operation_type:
+        st.header("1. Intensity Transformations")
+        tab_vis, tab_theory = st.tabs(["🎨 Visualization", "📖 Theory"])
+        
+        with tab_theory:
+            st.markdown(r"""
+            ### Intensity Transformations
+            These operations work on individual pixels: $s = T(r)$
+            - **r**: Input intensity
+            - **s**: Output intensity
+            - **T**: Transformation function
+            """)
+            
+        with tab_vis:
+            st.sidebar.subheader("Transformation Settings")
+            transform_mode = st.sidebar.selectbox(
+                "Select Transformation:",
+                [
+                    "Image Negative",
+                    "Log Transformation",
+                    "Inverse Log Transformation",
+                    "Power-law (Gamma) Transform",
+                    "Contrast Stretching",
+                    "Gray-level Slicing",
+                    "Bit-plane Slicing"
+                ]
+            )
+            
+            # Initialize T(r) for plotting
+            r_values = np.arange(256)
+            s_values = r_values.copy()
 
-        if transform_mode == "Image Negative":
-            # s = L - 1 - r
-            processed_image = 255 - original_image
-            st.sidebar.info("Formula: s = 255 - r")
+            if transform_mode == "Image Negative":
+                # s = L - 1 - r
+                processed_image = 255 - original_image
+                s_values = 255 - r_values
+                st.sidebar.info("Formula: $s = 255 - r$")
 
-        elif transform_mode == "Log Transformation":
-            # s = c * log(1 + r)
-            # Calculate default c safely
-            img_max = np.max(original_image)
-            if img_max > 0:
-                default_c = 255 / np.log(1 + float(img_max))
-            else:
-                default_c = 1.0
-            
-            # Ensure slider range accommodates the default value
-            max_c_slider = max(100.0, float(default_c) * 1.2)
-            
-            c = st.sidebar.slider("Constant (c)", 0.0, float(max_c_slider), float(default_c))
-            
-            processed_image = c * (np.log(1 + original_image.astype(np.float64)))
-            processed_image = np.clip(processed_image, 0, 255).astype(np.uint8)
-            st.sidebar.info("Formula: s = c * log(1 + r)")
-
-        elif transform_mode == "Inverse Log Transformation":
-            # s = c * (exp(r) - 1)
-            # Normalize to 0-1 for stability then scale back
-            c = st.sidebar.slider("Constant (c)", 0.0, 5.0, 1.0)
-            # Approximation for visualization
-            norm_img = original_image / 255.0
-            processed_image = c * (np.exp(norm_img) - 1)
-            # Scale to 0-255 and clip
-            processed_image = np.clip(processed_image * 255, 0, 255).astype(np.uint8)
-            st.sidebar.info("Formula: s = c * (exp(r) - 1)")
-
-        elif transform_mode == "Power-law (Gamma) Transform":
-            # s = c * r^gamma
-            gamma = st.sidebar.slider("Gamma (γ)", 0.1, 5.0, 1.0, 0.1)
-            c = st.sidebar.number_input("Constant (c)", value=1.0)
-            
-            # Normalize, apply gamma, scale back
-            norm_img = original_image / 255.0
-            processed_image = c * np.power(norm_img, gamma)
-            # Scale to 0-255 and clip
-            processed_image = np.clip(processed_image * 255, 0, 255).astype(np.uint8)
-            
-            st.sidebar.info(f"Formula: s = c * r^{gamma}")
-            if gamma < 1:
-                st.sidebar.text("Expands dark values (Brightens image)")
-            elif gamma > 1:
-                st.sidebar.text("Compresses dark values (Darkens image)")
-
-        elif transform_mode == "Contrast Stretching":
-            # Piecewise linear
-            st.sidebar.text("Define points (r1, s1) and (r2, s2)")
-            r1 = st.sidebar.slider("r1", 0, 255, 70)
-            s1 = st.sidebar.slider("s1", 0, 255, 0)
-            r2 = st.sidebar.slider("r2", 0, 255, 140)
-            s2 = st.sidebar.slider("s2", 0, 255, 255)
-            
-            def pixel_val(pix, r1, s1, r2, s2):
-                if 0 <= pix <= r1:
-                    return (s1 / r1) * pix
-                elif r1 < pix <= r2:
-                    return ((s2 - s1) / (r2 - r1)) * (pix - r1) + s1
-                else:
-                    return ((255 - s2) / (255 - r2)) * (pix - r2) + s2
-            
-            # Vectorize for speed
-            pixel_val_vec = np.vectorize(pixel_val)
-            # Handle division by zero edge cases in UI logic or simple try-except
-            try:
-                processed_image = pixel_val_vec(original_image, r1, s1, r2, s2)
-                processed_image = processed_image.astype(np.uint8)
-            except:
-                st.error("Avoid r1=0 or r1=r2 for this simple implementation.")
-
-        elif transform_mode == "Gray-level Slicing":
-            min_r = st.sidebar.slider("Min Intensity", 0, 255, 100)
-            max_r = st.sidebar.slider("Max Intensity", 0, 255, 200)
-            background = st.sidebar.radio("Background:", ("Retain Background", "Make Black"))
-            
-            height, width = original_image.shape
-            new_img = np.zeros((height, width), dtype=np.uint8)
-            
-            if background == "Retain Background":
-                new_img = original_image.copy()
-                # Highlight range
-                mask = (original_image >= min_r) & (original_image <= max_r)
-                new_img[mask] = 255
-            else:
-                # Black background
-                mask = (original_image >= min_r) & (original_image <= max_r)
-                new_img[mask] = 255
+            elif transform_mode == "Log Transformation":
+                # s = c * log(1 + r)
+                img_max = np.max(original_image)
+                default_c = 255 / np.log(1 + float(img_max)) if img_max > 0 else 1
+                max_c_slider = max(100.0, float(default_c) * 1.2)
+                c = st.sidebar.slider("Constant (c)", 0.0, float(max_c_slider), float(default_c))
                 
-            processed_image = new_img
+                processed_image = c * (np.log(1 + original_image.astype(np.float64)))
+                processed_image = np.clip(processed_image, 0, 255).astype(np.uint8)
+                
+                s_values = c * np.log(1 + r_values)
+                s_values = np.clip(s_values, 0, 255)
+                st.sidebar.info("Formula: $s = c \cdot \log(1 + r)$")
 
-        elif transform_mode == "Bit-plane Slicing":
-            plane = st.sidebar.slider("Bit Plane", 0, 7, 7)
-            # Extract bit plane
-            # Bitwise AND with 2^plane
-            processed_image = cv2.bitwise_and(original_image, 2**plane)
-            # Scale to 255 for visibility
-            processed_image = processed_image * (255 // (2**plane)) # Or just threshold > 0
-            st.sidebar.text(f"Showing Bit Plane {plane}")
+            elif transform_mode == "Inverse Log Transformation":
+                c = st.sidebar.slider("Constant (c)", 0.0, 5.0, 1.0)
+                norm_img = original_image / 255.0
+                processed_image = c * (np.exp(norm_img) - 1)
+                processed_image = np.clip(processed_image * 255, 0, 255).astype(np.uint8)
+                
+                s_values = c * (np.exp(r_values/255.0) - 1) * 255
+                s_values = np.clip(s_values, 0, 255)
+                st.sidebar.info("Formula: $s = c \cdot (e^r - 1)$")
+
+            elif transform_mode == "Power-law (Gamma) Transform":
+                gamma = st.sidebar.slider("Gamma (γ)", 0.1, 5.0, 1.0, 0.1)
+                c = st.sidebar.number_input("Constant (c)", value=1.0)
+                
+                norm_img = original_image / 255.0
+                processed_image = c * np.power(norm_img, gamma)
+                processed_image = np.clip(processed_image * 255, 0, 255).astype(np.uint8)
+                
+                s_values = c * np.power(r_values/255.0, gamma) * 255
+                s_values = np.clip(s_values, 0, 255)
+                
+                st.sidebar.info(f"Formula: $s = c \cdot r^{{\gamma}}$")
+
+            elif transform_mode == "Contrast Stretching":
+                st.sidebar.text("Define points (r1, s1) and (r2, s2)")
+                r1 = st.sidebar.slider("r1", 0, 255, 70)
+                s1 = st.sidebar.slider("s1", 0, 255, 0)
+                r2 = st.sidebar.slider("r2", 0, 255, 140)
+                s2 = st.sidebar.slider("s2", 0, 255, 255)
+                
+                def pixel_val(pix, r1, s1, r2, s2):
+                    if pix <= r1: return (s1 / r1) * pix if r1 > 0 else 0
+                    elif pix <= r2: return ((s2 - s1) / (r2 - r1)) * (pix - r1) + s1 if r2 > r1 else s1
+                    else: return ((255 - s2) / (255 - r2)) * (pix - r2) + s2 if 255 > r2 else s2
+                
+                pixel_val_vec = np.vectorize(pixel_val)
+                processed_image = pixel_val_vec(original_image, r1, s1, r2, s2).astype(np.uint8)
+                s_values = pixel_val_vec(r_values, r1, s1, r2, s2)
+
+            elif transform_mode == "Gray-level Slicing":
+                min_r = st.sidebar.slider("Min Intensity", 0, 255, 100)
+                max_r = st.sidebar.slider("Max Intensity", 0, 255, 200)
+                background = st.sidebar.radio("Background:", ("Retain Background", "Make Black"))
+                
+                if background == "Retain Background":
+                    processed_image = original_image.copy()
+                    mask = (original_image >= min_r) & (original_image <= max_r)
+                    processed_image[mask] = 255
+                    
+                    s_values = r_values.copy()
+                    mask_vals = (r_values >= min_r) & (r_values <= max_r)
+                    s_values[mask_vals] = 255
+                else:
+                    processed_image = np.zeros_like(original_image)
+                    mask = (original_image >= min_r) & (original_image <= max_r)
+                    processed_image[mask] = 255
+                    
+                    s_values = np.zeros_like(r_values)
+                    mask_vals = (r_values >= min_r) & (r_values <= max_r)
+                    s_values[mask_vals] = 255
+
+            elif transform_mode == "Bit-plane Slicing":
+                plane = st.sidebar.slider("Bit Plane", 0, 7, 7)
+                processed_image = cv2.bitwise_and(original_image, 2**plane)
+                processed_image = processed_image * (255 // (2**plane))
+                st.sidebar.text(f"Showing Bit Plane {plane}")
+                # Plotting bit plane is tricky as it's not a continuous function, skip plot or show step
+                s_values = np.zeros_like(r_values) # Placeholder
+
+            # Plot Transformation Function
+            if transform_mode != "Bit-plane Slicing":
+                fig_t, ax_t = plt.subplots(figsize=(3, 3))
+                ax_t.plot(r_values, s_values, 'r-')
+                ax_t.set_title("Transformation T(r)")
+                ax_t.set_xlabel("Input (r)")
+                ax_t.set_ylabel("Output (s)")
+                ax_t.grid(True)
+                st.sidebar.pyplot(fig_t)
 
     # ==========================================
     # 2. NEIGHBORHOOD / SPATIAL FILTERING
     # ==========================================
-    elif operation_type == "Neighborhood (Spatial Filtering) Operations":
+    elif "Spatial Filtering" in operation_type:
+        st.header("2. Spatial Filtering")
         st.sidebar.subheader("Spatial Filtering")
         filter_category = st.sidebar.radio(
             "Filter Category:", 
@@ -330,139 +342,187 @@ if uploaded_file is not None:
     # ==========================================
     # 3. FREQUENCY DOMAIN FILTERING
     # ==========================================
-    elif operation_type == "Frequency Domain Filtering":
-        st.sidebar.subheader("Frequency Domain Filtering")
+    elif "Frequency Domain" in operation_type:
+        st.header("3. Frequency Domain Filtering")
         
-        # Helper function to create distance matrix
-        def get_distance_matrix(shape):
-            rows, cols = shape
+        tab_vis, tab_theory = st.tabs(["🎛️ Interactive Lab", "📘 Theory & Formulas"])
+        
+        with tab_theory:
+            st.markdown(r"""
+            ### Concept
+            Filtering in the frequency domain involves:
+            1.  **DFT**: Transform image to frequency domain ($F(u,v)$).
+            2.  **Shift**: Move zero-frequency component to center.
+            3.  **Filter**: Multiply by a mask $H(u,v)$.
+                $$G(u,v) = H(u,v) \times F(u,v)$$
+            4.  **IDFT**: Inverse transform to get back spatial image.
+            
+            ### Filters
+            - **Low Pass**: Blurs image (removes high freq edges).
+            - **High Pass**: Sharpens image (removes low freq smooth areas).
+            """)
+
+        with tab_vis:
+            st.sidebar.subheader("Frequency Domain Settings")
+            
+            # Helper function to create distance matrix
+            def get_distance_matrix(shape):
+                rows, cols = shape
+                crow, ccol = rows // 2, cols // 2
+                x = np.linspace(-ccol, ccol - 1, cols)
+                y = np.linspace(-crow, crow - 1, rows)
+                X, Y = np.meshgrid(x, y)
+                dist = np.sqrt(X**2 + Y**2)
+                return dist
+
+            freq_filter_type = st.sidebar.selectbox(
+                "Filter Type:",
+                ["Ideal Low-Pass (ILPF)", "Butterworth Low-Pass (BLPF)", "Gaussian Low-Pass (GLPF)",
+                 "Ideal High-Pass (IHPF)", "Butterworth High-Pass (BHPF)", "Gaussian High-Pass (GHPF)",
+                 "Band-Pass Filter", "Homomorphic Filtering"]
+            )
+
+            # Perform DFT
+            dft = cv2.dft(np.float32(original_image), flags=cv2.DFT_COMPLEX_OUTPUT)
+            dft_shift = np.fft.fftshift(dft)
+            
+            # Calculate Magnitude Spectrum of Original
+            mag_original = 20 * np.log(cv2.magnitude(dft_shift[:,:,0], dft_shift[:,:,1]) + 1)
+            
+            rows, cols = original_image.shape
             crow, ccol = rows // 2, cols // 2
-            x = np.linspace(-ccol, ccol - 1, cols)
-            y = np.linspace(-crow, crow - 1, rows)
-            X, Y = np.meshgrid(x, y)
-            dist = np.sqrt(X**2 + Y**2)
-            return dist
+            
+            # Initialize mask
+            mask = np.zeros((rows, cols, 2), np.float32)
+            D = get_distance_matrix((rows, cols))
+            
+            cutoff = st.sidebar.slider("Cutoff Frequency (Radius D0)", 1, min(rows, cols)//2, 30)
+            
+            order = 2
+            if "Butterworth" in freq_filter_type:
+                order = st.sidebar.slider("Order (n)", 1, 10, 2)
+                
+            if freq_filter_type == "Ideal Low-Pass (ILPF)":
+                mask[D <= cutoff] = 1
+                st.sidebar.info("Passes frequencies within D0, cuts off others. Causes ringing.")
+                
+            elif freq_filter_type == "Butterworth Low-Pass (BLPF)":
+                # H = 1 / (1 + (D/D0)^(2n))
+                H = 1 / (1 + (D / cutoff)**(2 * order))
+                mask[:, :, 0] = H
+                mask[:, :, 1] = H
+                st.sidebar.info("Smoother transition than Ideal. No ringing.")
+                
+            elif freq_filter_type == "Gaussian Low-Pass (GLPF)":
+                # H = exp(-D^2 / (2*D0^2))
+                H = np.exp(-(D**2) / (2 * (cutoff**2)))
+                mask[:, :, 0] = H
+                mask[:, :, 1] = H
+                st.sidebar.info("Smooth transition. No ringing.")
+                
+            elif freq_filter_type == "Ideal High-Pass (IHPF)":
+                mask[D > cutoff] = 1
+                st.sidebar.info("Cuts off low frequencies. Sharpens but causes ringing.")
+                
+            elif freq_filter_type == "Butterworth High-Pass (BHPF)":
+                # H = 1 / (1 + (D0/D)^(2n))
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    H = 1 / (1 + (cutoff / D)**(2 * order))
+                    H[D == 0] = 0 # Handle center
+                mask[:, :, 0] = H
+                mask[:, :, 1] = H
+                st.sidebar.info("Smoother transition high-pass.")
+                
+            elif freq_filter_type == "Gaussian High-Pass (GHPF)":
+                # H = 1 - exp(-D^2 / (2*D0^2))
+                H = 1 - np.exp(-(D**2) / (2 * (cutoff**2)))
+                mask[:, :, 0] = H
+                mask[:, :, 1] = H
+                st.sidebar.info("Smooth high-pass filter.")
+                
+            elif freq_filter_type == "Band-Pass Filter":
+                bandwidth = st.sidebar.slider("Bandwidth (W)", 5, 100, 20)
+                center_freq = st.sidebar.slider("Center Frequency (C0)", cutoff, min(rows, cols)//2, cutoff + 20)
+                
+                # Simple Ideal Band Pass: 1 if C0 - W/2 <= D <= C0 + W/2
+                lower = center_freq - bandwidth / 2
+                upper = center_freq + bandwidth / 2
+                mask[(D >= lower) & (D <= upper)] = 1
+                st.sidebar.info("Passes a band of frequencies.")
 
-        freq_filter_type = st.sidebar.selectbox(
-            "Filter Type:",
-            ["Ideal Low-Pass (ILPF)", "Butterworth Low-Pass (BLPF)", "Gaussian Low-Pass (GLPF)",
-             "Ideal High-Pass (IHPF)", "Butterworth High-Pass (BHPF)", "Gaussian High-Pass (GHPF)",
-             "Band-Pass Filter", "Homomorphic Filtering"]
-        )
+            elif freq_filter_type == "Homomorphic Filtering":
+                # Homomorphic: ln(f) -> DFT -> H(u,v) -> IDFT -> exp(g)
+                # H(u,v) = (gH - gL) * (1 - exp(-c * (D^2 / D0^2))) + gL
+                gH = st.sidebar.slider("High Freq Gain (gH > 1)", 1.0, 5.0, 2.0)
+                gL = st.sidebar.slider("Low Freq Gain (gL < 1)", 0.0, 1.0, 0.5)
+                c_const = st.sidebar.slider("Constant (c)", 0.1, 5.0, 1.0)
+                
+                # Log transform
+                img_log = np.log1p(np.float32(original_image))
+                
+                # DFT of log
+                dft_log = cv2.dft(img_log, flags=cv2.DFT_COMPLEX_OUTPUT)
+                dft_shift_log = np.fft.fftshift(dft_log)
+                
+                # Filter
+                H = (gH - gL) * (1 - np.exp(-c_const * (D**2) / (cutoff**2))) + gL
+                mask[:, :, 0] = H
+                mask[:, :, 1] = H
+                
+                # Apply filter
+                fshift = dft_shift_log * mask
+                f_ishift = np.fft.ifftshift(fshift)
+                img_back_log = cv2.idft(f_ishift)
+                img_back_log = cv2.magnitude(img_back_log[:,:,0], img_back_log[:,:,1])
+                
+                # Exp transform
+                processed_image = np.expm1(img_back_log)
+                processed_image = cv2.normalize(processed_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                
+                st.sidebar.info("Enhances contrast by compressing dynamic range (illumination) and enhancing contrast (reflectance).")
 
-        # Perform DFT
-        dft = cv2.dft(np.float32(original_image), flags=cv2.DFT_COMPLEX_OUTPUT)
-        dft_shift = np.fft.fftshift(dft)
-        rows, cols = original_image.shape
-        crow, ccol = rows // 2, cols // 2
-        
-        # Initialize mask
-        mask = np.zeros((rows, cols, 2), np.float32)
-        D = get_distance_matrix((rows, cols))
-        
-        cutoff = st.sidebar.slider("Cutoff Frequency (D0)", 1, min(rows, cols)//2, 30)
-        
-        if "Butterworth" in freq_filter_type:
-            order = st.sidebar.slider("Order (n)", 1, 10, 2)
-            
-        if freq_filter_type == "Ideal Low-Pass (ILPF)":
-            mask[D <= cutoff] = 1
-            st.sidebar.info("Passes frequencies within D0, cuts off others. Causes ringing.")
-            
-        elif freq_filter_type == "Butterworth Low-Pass (BLPF)":
-            # H = 1 / (1 + (D/D0)^(2n))
-            H = 1 / (1 + (D / cutoff)**(2 * order))
-            mask[:, :, 0] = H
-            mask[:, :, 1] = H
-            st.sidebar.info("Smoother transition than Ideal. No ringing.")
-            
-        elif freq_filter_type == "Gaussian Low-Pass (GLPF)":
-            # H = exp(-D^2 / (2*D0^2))
-            H = np.exp(-(D**2) / (2 * (cutoff**2)))
-            mask[:, :, 0] = H
-            mask[:, :, 1] = H
-            st.sidebar.info("Smooth transition. No ringing.")
-            
-        elif freq_filter_type == "Ideal High-Pass (IHPF)":
-            mask[D > cutoff] = 1
-            st.sidebar.info("Cuts off low frequencies. Sharpens but causes ringing.")
-            
-        elif freq_filter_type == "Butterworth High-Pass (BHPF)":
-            # H = 1 / (1 + (D0/D)^(2n))
-            with np.errstate(divide='ignore', invalid='ignore'):
-                H = 1 / (1 + (cutoff / D)**(2 * order))
-                H[D == 0] = 0 # Handle center
-            mask[:, :, 0] = H
-            mask[:, :, 1] = H
-            st.sidebar.info("Smoother transition high-pass.")
-            
-        elif freq_filter_type == "Gaussian High-Pass (GHPF)":
-            # H = 1 - exp(-D^2 / (2*D0^2))
-            H = 1 - np.exp(-(D**2) / (2 * (cutoff**2)))
-            mask[:, :, 0] = H
-            mask[:, :, 1] = H
-            st.sidebar.info("Smooth high-pass filter.")
-            
-        elif freq_filter_type == "Band-Pass Filter":
-            bandwidth = st.sidebar.slider("Bandwidth (W)", 5, 100, 20)
-            center_freq = st.sidebar.slider("Center Frequency (C0)", cutoff, min(rows, cols)//2, cutoff + 20)
-            
-            # Simple Ideal Band Pass: 1 if C0 - W/2 <= D <= C0 + W/2
-            lower = center_freq - bandwidth / 2
-            upper = center_freq + bandwidth / 2
-            mask[(D >= lower) & (D <= upper)] = 1
-            st.sidebar.info("Passes a band of frequencies.")
+            # Apply mask and Inverse DFT (for non-Homomorphic)
+            if freq_filter_type != "Homomorphic Filtering":
+                fshift = dft_shift * mask
+                
+                # Calculate Magnitude Spectrum of Filtered
+                mag_filtered = 20 * np.log(cv2.magnitude(fshift[:,:,0], fshift[:,:,1]) + 1)
+                
+                f_ishift = np.fft.ifftshift(fshift)
+                img_back = cv2.idft(f_ishift)
+                img_back = cv2.magnitude(img_back[:,:,0], img_back[:,:,1])
+                
+                processed_image = cv2.normalize(img_back, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            else:
+                # For homomorphic, we already computed processed_image, but let's just show original spectrum for filtered slot or skip
+                mag_filtered = np.zeros_like(mag_original)
 
-        elif freq_filter_type == "Homomorphic Filtering":
-            # Homomorphic: ln(f) -> DFT -> H(u,v) -> IDFT -> exp(g)
-            # H(u,v) = (gH - gL) * (1 - exp(-c * (D^2 / D0^2))) + gL
-            gH = st.sidebar.slider("High Freq Gain (gH > 1)", 1.0, 5.0, 2.0)
-            gL = st.sidebar.slider("Low Freq Gain (gL < 1)", 0.0, 1.0, 0.5)
-            c_const = st.sidebar.slider("Constant (c)", 0.1, 5.0, 1.0)
+            # Visualization
+            st.write("### 🔍 Frequency Domain Analysis")
+            c1, c2, c3 = st.columns(3)
             
-            # Log transform
-            img_log = np.log1p(np.float32(original_image))
-            
-            # DFT of log
-            dft_log = cv2.dft(img_log, flags=cv2.DFT_COMPLEX_OUTPUT)
-            dft_shift_log = np.fft.fftshift(dft_log)
-            
-            # Filter
-            H = (gH - gL) * (1 - np.exp(-c_const * (D**2) / (cutoff**2))) + gL
-            mask[:, :, 0] = H
-            mask[:, :, 1] = H
-            
-            # Apply filter
-            fshift = dft_shift_log * mask
-            f_ishift = np.fft.ifftshift(fshift)
-            img_back_log = cv2.idft(f_ishift)
-            img_back_log = cv2.magnitude(img_back_log[:,:,0], img_back_log[:,:,1])
-            
-            # Exp transform
-            processed_image = np.expm1(img_back_log)
-            processed_image = cv2.normalize(processed_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-            
-            st.sidebar.info("Enhances contrast by compressing dynamic range (illumination) and enhancing contrast (reflectance).")
-
-        # Apply mask and Inverse DFT (for non-Homomorphic)
-        if freq_filter_type != "Homomorphic Filtering":
-            fshift = dft_shift * mask
-            f_ishift = np.fft.ifftshift(fshift)
-            img_back = cv2.idft(f_ishift)
-            img_back = cv2.magnitude(img_back[:,:,0], img_back[:,:,1])
-            
-            processed_image = cv2.normalize(img_back, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-            
-            # Show Spectrum
-            if st.sidebar.checkbox("Show Magnitude Spectrum"):
-                magnitude_spectrum = 20 * np.log(cv2.magnitude(dft_shift[:,:,0], dft_shift[:,:,1]) + 1)
-                st.sidebar.image(cv2.normalize(magnitude_spectrum, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8), 
-                                 caption="Magnitude Spectrum", clamp=True)
+            with c1:
+                st.image(original_image, caption="1. Original Spatial Image", use_container_width=True, channels='GRAY')
+                st.image(cv2.normalize(mag_original, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8), 
+                         caption="2. Original Frequency Spectrum (DFT)", use_container_width=True, clamp=True)
+                
+            with c2:
+                # Visualize Mask (Take channel 0)
+                mask_vis = mask[:,:,0]
+                st.image(mask_vis, caption=f"3. Filter Mask H(u,v) (Radius={cutoff})", use_container_width=True, clamp=True)
+                st.markdown(f"**Filter:** {freq_filter_type}")
+                
+            with c3:
+                st.image(processed_image, caption="5. Result Spatial Image (IDFT)", use_container_width=True, channels='GRAY')
+                if freq_filter_type != "Homomorphic Filtering":
+                    st.image(cv2.normalize(mag_filtered, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8), 
+                             caption="4. Filtered Spectrum (Spectrum × Mask)", use_container_width=True, clamp=True)
 
     # ==========================================
     # 4. MORPHOLOGICAL OPERATIONS
     # ==========================================
-    elif operation_type == "Morphological Operations":
+    elif "Morphological" in operation_type:
+        st.header("4. Morphological Operations")
         st.sidebar.subheader("Morphological Operations")
         
         # Thresholding for binary operations

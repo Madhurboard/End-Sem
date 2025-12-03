@@ -1226,7 +1226,30 @@ if original_image is not None:
     
     with analysis_tabs[1]:
         # Difference image
-        diff = cv2.absdiff(original_image, processed_image)
+        # Ensure images are the same size before computing difference
+        target_shape = (original_image.shape[1], original_image.shape[0])
+        if processed_image.shape[:2] != original_image.shape[:2]:
+            processed_image_resized = cv2.resize(processed_image, target_shape)
+        else:
+            processed_image_resized = processed_image
+
+        # Ensure both are grayscale for difference calculation
+        if len(original_image.shape) == 3:
+            orig_gray = cv2.cvtColor(original_image, cv2.COLOR_RGB2GRAY)
+        else:
+            orig_gray = original_image
+            
+        if len(processed_image_resized.shape) == 3:
+            proc_gray = cv2.cvtColor(processed_image_resized, cv2.COLOR_RGB2GRAY)
+        else:
+            proc_gray = processed_image_resized
+            
+        # Ensure same type
+        orig_gray = orig_gray.astype(np.uint8)
+        proc_gray = proc_gray.astype(np.uint8)
+
+        diff = cv2.absdiff(orig_gray, proc_gray)
+            
         diff_colored = cv2.applyColorMap(diff, cv2.COLORMAP_JET)
         diff_colored = cv2.cvtColor(diff_colored, cv2.COLOR_BGR2RGB)
         

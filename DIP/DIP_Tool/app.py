@@ -268,12 +268,11 @@ if original_image is not None:
     # ==========================================
     if "Intensity" in operation_type:
         st.header("1. Intensity Transformations")
-        tab_vis, tab_theory = st.tabs(["🎨 Interactive Lab", "📖 Theory & Formulas"])
+        
+        tab_vis, tab_theory = st.tabs(["🛠️ Interactive Lab", "📖 Theory & Formulas"])
         
         with tab_theory:
             st.markdown(r"""
-            ## 📚 Intensity Transformations (Point Operations)
-            
             ### Concept
             These operations modify pixel values **individually** without considering neighbors.
             
@@ -954,390 +953,245 @@ if original_image is not None:
     # ==========================================
     elif "Segmentation" in operation_type:
         st.header("5. Image Segmentation")
-        tab_vis, tab_theory = st.tabs(["🎨 Interactive Lab", "📖 Theory & Formulas"])
         
-        with tab_theory:
-            st.markdown(r"""
-            ## 📚 Image Segmentation
-            
-            ### Concept
-            Segmentation divides an image into **meaningful regions** (objects).
-            
-            ---
-            
-            ### 1️⃣ Pixel-Based (Thresholding)
-            
-            **Single Thresholding:**
-            $$g(x,y) = \begin{cases} 1, & f(x,y) > T \\ 0, & f(x,y) \leq T \end{cases}$$
-            
-            **Otsu's Method:** Automatically finds optimal threshold by maximizing between-class variance.
-            
-            **Adaptive Thresholding:** Uses local thresholds for uneven illumination.
-            
-            ---
-            
-            ### 2️⃣ Edge-Based Segmentation
-            
-            **Gradient Magnitude:**
-            $$|\nabla f| = |G_x| + |G_y|$$
-            
-            **Roberts Operator:**
-            $$G_x = f(x,y) - f(x+1,y+1), \quad G_y = f(x+1,y) - f(x,y+1)$$
-            
-            **Canny Edge Detection:** Multi-stage algorithm with:
-            1. Gaussian smoothing
-            2. Gradient calculation
-            3. Non-maximum suppression
-            4. Hysteresis thresholding
-            
-            ---
-            
-            ### 3️⃣ Region-Based Segmentation
-            
-            **Region Growing:** Start with seeds, add similar neighbors.
-            
-            **Split-and-Merge:** Quadtree splitting + merging uniform regions.
-            
-            **Watershed:** Treats image as topographic surface, finds "catchment basins".
-            """)
+        # Create tabs for the new structure
+        seg_tabs = st.tabs([
+            "1. Discontinuity (Edge)", 
+            "2. Thresholding", 
+            "3. Region-Based", 
+            "4. Boundary & Corner",
+            "📖 Theory"
+        ])
         
-        with tab_vis:
-            st.sidebar.subheader("Segmentation Methods")
-            
-            seg_category = st.sidebar.selectbox(
-                "Category:",
-                ["Pixel-Based (Thresholding)", "Edge-Based Segmentation", "Region-Based Segmentation"]
+        # --- Tab 1: Discontinuity (Edge-Based) ---
+        with seg_tabs[0]:
+            st.subheader("Detection of Discontinuities")
+            disc_type = st.sidebar.selectbox(
+                "Discontinuity Type:",
+                ["Point Detection", "Line Detection", "Edge Detection (Gradient)", "Laplacian (2nd Derivative)"]
             )
             
-            # ==========================================
-            # 5.1 PIXEL-BASED (THRESHOLDING)
-            # ==========================================
-            if seg_category == "Pixel-Based (Thresholding)":
-                thresh_method = st.sidebar.selectbox(
-                    "Thresholding Method:",
-                    ["Global (Manual)", "Otsu's Automatic", "Adaptive Mean", "Adaptive Gaussian", 
-                     "Multiple Thresholding", "Iterative Selection"]
-                )
+            if disc_type == "Point Detection":
+                # 2.3 Point Detection
+                mask_type = st.sidebar.selectbox("Mask Type", ["Standard Laplacian", "Weighted"])
+                thresh = st.sidebar.slider("Threshold", 0, 255, 127)
                 
-                if thresh_method == "Global (Manual)":
-                    thresh_val = st.sidebar.slider("Threshold Value (T)", 0, 255, 127)
-                    thresh_type = st.sidebar.selectbox("Type:", ["Binary", "Binary Inverse", "Truncate", "To Zero", "To Zero Inverse"])
-                    
-                    type_map = {
-                        "Binary": cv2.THRESH_BINARY,
-                        "Binary Inverse": cv2.THRESH_BINARY_INV,
-                        "Truncate": cv2.THRESH_TRUNC,
-                        "To Zero": cv2.THRESH_TOZERO,
-                        "To Zero Inverse": cv2.THRESH_TOZERO_INV
-                    }
-                    _, processed_image = cv2.threshold(original_image, thresh_val, 255, type_map[thresh_type])
-                    st.sidebar.info(f"g(x,y) = 255 if f(x,y) > {thresh_val}, else 0")
-                    
-                elif thresh_method == "Otsu's Automatic":
-                    otsu_thresh, processed_image = cv2.threshold(original_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                    st.sidebar.success(f"Otsu's optimal threshold: **{otsu_thresh:.0f}**")
-                    st.sidebar.info("Maximizes between-class variance to find optimal T.")
-                    
-                elif thresh_method == "Adaptive Mean":
-                    block_size = st.sidebar.slider("Block Size", 3, 99, 11, step=2)
-                    c_val = st.sidebar.slider("Constant C", -20, 20, 2)
-                    processed_image = cv2.adaptiveThreshold(
-                        original_image, 255, cv2.ADAPTIVE_THRESH_MEAN_C, 
-                        cv2.THRESH_BINARY, block_size, c_val
-                    )
-                    st.sidebar.info("T = mean of block - C. Good for uneven illumination.")
-                    
-                elif thresh_method == "Adaptive Gaussian":
-                    block_size = st.sidebar.slider("Block Size", 3, 99, 11, step=2)
-                    c_val = st.sidebar.slider("Constant C", -20, 20, 2)
-                    processed_image = cv2.adaptiveThreshold(
-                        original_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                        cv2.THRESH_BINARY, block_size, c_val
-                    )
-                    st.sidebar.info("T = Gaussian-weighted mean of block - C.")
-                    
-                elif thresh_method == "Multiple Thresholding":
-                    t1 = st.sidebar.slider("Threshold 1 (T1)", 0, 255, 85)
-                    t2 = st.sidebar.slider("Threshold 2 (T2)", 0, 255, 170)
-                    
-                    # Create 3-level segmentation
-                    processed_image = np.zeros_like(original_image)
-                    processed_image[original_image <= t1] = 0
-                    processed_image[(original_image > t1) & (original_image <= t2)] = 127
-                    processed_image[original_image > t2] = 255
-                    st.sidebar.info(f"3 levels: [0-{t1}]=Black, [{t1}-{t2}]=Gray, [{t2}-255]=White")
-                    
-                elif thresh_method == "Iterative Selection":
-                    # Implement iterative threshold selection
-                    max_iter = st.sidebar.slider("Max Iterations", 5, 50, 20)
-                    
-                    # Initial T = mean intensity
-                    T = np.mean(original_image)
-                    iterations = 0
-                    
-                    for i in range(max_iter):
-                        # Separate pixels
-                        G1 = original_image[original_image > T]
-                        G2 = original_image[original_image <= T]
-                        
-                        if len(G1) == 0 or len(G2) == 0:
-                            break
-                        
-                        # New threshold
-                        m1 = np.mean(G1)
-                        m2 = np.mean(G2)
-                        T_new = (m1 + m2) / 2
-                        iterations = i + 1
-                        
-                        if abs(T - T_new) < 0.5:
-                            break
-                        T = T_new
-                    
-                    _, processed_image = cv2.threshold(original_image, int(T), 255, cv2.THRESH_BINARY)
-                    st.sidebar.success(f"Converged T = **{T:.1f}** in {iterations} iterations")
-                    st.sidebar.info("T = (mean_object + mean_background) / 2")
-            
-            # ==========================================
-            # 5.2 EDGE-BASED SEGMENTATION
-            # ==========================================
-            elif seg_category == "Edge-Based Segmentation":
-                edge_method = st.sidebar.selectbox(
-                    "Edge Detection Method:",
-                    ["Point Detection", "Line Detection", "Roberts", "Prewitt", "Sobel", 
-                     "Laplacian (LoG)", "Canny", "Zero-Crossing"]
-                )
-                
-                if edge_method == "Point Detection":
-                    # Laplacian-based point detection
+                if mask_type == "Standard Laplacian":
                     kernel = np.array([[-1, -1, -1], [-1, 8, -1], [-1, -1, -1]])
-                    thresh = st.sidebar.slider("Detection Threshold", 0, 255, 50)
+                else:
+                    kernel = np.array([[1, 1, 1], [1, -8, 1], [1, 1, 1]])
                     
-                    filtered = cv2.filter2D(original_image, cv2.CV_64F, kernel)
-                    processed_image = np.uint8(np.abs(filtered) > thresh) * 255
-                    st.sidebar.info("Detects isolated points using Laplacian mask.")
-                    
-                elif edge_method == "Line Detection":
-                    line_dir = st.sidebar.selectbox("Line Direction:", ["Horizontal", "Vertical", "+45°", "-45°"])
-                    thresh = st.sidebar.slider("Detection Threshold", 0, 255, 50)
-                    
-                    kernels = {
-                        "Horizontal": np.array([[-1, -1, -1], [2, 2, 2], [-1, -1, -1]]),
-                        "Vertical": np.array([[-1, 2, -1], [-1, 2, -1], [-1, 2, -1]]),
-                        "+45°": np.array([[-1, -1, 2], [-1, 2, -1], [2, -1, -1]]),
-                        "-45°": np.array([[2, -1, -1], [-1, 2, -1], [-1, -1, 2]])
-                    }
-                    
-                    filtered = cv2.filter2D(original_image, cv2.CV_64F, kernels[line_dir])
-                    processed_image = np.uint8(np.abs(filtered) > thresh) * 255
-                    st.sidebar.info(f"Detects {line_dir} lines using directional mask.")
-                    
-                elif edge_method == "Roberts":
-                    # Roberts cross operator
-                    kernel_x = np.array([[1, 0], [0, -1]], dtype=np.float64)
-                    kernel_y = np.array([[0, 1], [-1, 0]], dtype=np.float64)
-                    
-                    Gx = cv2.filter2D(original_image.astype(np.float64), -1, kernel_x)
-                    Gy = cv2.filter2D(original_image.astype(np.float64), -1, kernel_y)
-                    
-                    magnitude = np.abs(Gx) + np.abs(Gy)
-                    processed_image = np.clip(magnitude, 0, 255).astype(np.uint8)
-                    st.sidebar.info("Roberts: Gx = f(x,y) - f(x+1,y+1), Gy = f(x+1,y) - f(x,y+1)")
-                    
-                elif edge_method == "Prewitt":
-                    kernel_x = np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]], dtype=np.float64)
-                    kernel_y = np.array([[-1, -1, -1], [0, 0, 0], [1, 1, 1]], dtype=np.float64)
-                    
-                    Gx = cv2.filter2D(original_image.astype(np.float64), -1, kernel_x)
-                    Gy = cv2.filter2D(original_image.astype(np.float64), -1, kernel_y)
-                    
-                    magnitude = np.sqrt(Gx**2 + Gy**2)
-                    processed_image = np.clip(magnitude, 0, 255).astype(np.uint8)
-                    st.sidebar.info("Prewitt operator with 3x3 kernels.")
-                    
-                elif edge_method == "Sobel":
-                    ksize = st.sidebar.selectbox("Kernel Size:", [3, 5, 7])
-                    
-                    Gx = cv2.Sobel(original_image, cv2.CV_64F, 1, 0, ksize=ksize)
-                    Gy = cv2.Sobel(original_image, cv2.CV_64F, 0, 1, ksize=ksize)
-                    
-                    magnitude = np.sqrt(Gx**2 + Gy**2)
-                    processed_image = np.clip(magnitude, 0, 255).astype(np.uint8)
-                    st.sidebar.info("Sobel uses weighted gradients for noise reduction.")
-                    
-                elif edge_method == "Laplacian (LoG)":
-                    # Laplacian of Gaussian
-                    blur_sigma = st.sidebar.slider("Gaussian Sigma", 0.5, 5.0, 1.0, step=0.5)
-                    
-                    blurred = cv2.GaussianBlur(original_image, (0, 0), blur_sigma)
-                    laplacian = cv2.Laplacian(blurred, cv2.CV_64F)
-                    processed_image = np.clip(np.abs(laplacian), 0, 255).astype(np.uint8)
-                    st.sidebar.info("Laplacian of Gaussian (LoG) for second-order edge detection.")
-                    
-                elif edge_method == "Canny":
-                    low_thresh = st.sidebar.slider("Low Threshold", 0, 255, 50)
-                    high_thresh = st.sidebar.slider("High Threshold", 0, 255, 150)
-                    aperture = st.sidebar.selectbox("Aperture Size:", [3, 5, 7])
-                    
-                    processed_image = cv2.Canny(original_image, low_thresh, high_thresh, apertureSize=aperture)
-                    st.sidebar.info("Canny: Smoothing → Gradient → Non-max suppression → Hysteresis")
-                    
-                elif edge_method == "Zero-Crossing":
-                    # Zero-crossing using Laplacian
-                    blur_sigma = st.sidebar.slider("Gaussian Sigma", 0.5, 5.0, 1.5, step=0.5)
-                    
-                    blurred = cv2.GaussianBlur(original_image, (0, 0), blur_sigma)
-                    laplacian = cv2.Laplacian(blurred, cv2.CV_64F)
-                    
-                    # Detect zero crossings
-                    rows, cols = laplacian.shape
-                    zero_cross = np.zeros((rows, cols), dtype=np.uint8)
-                    
-                    for i in range(1, rows-1):
-                        for j in range(1, cols-1):
-                            patch = laplacian[i-1:i+2, j-1:j+2]
-                            if patch.min() * patch.max() < 0:  # Sign change
-                                zero_cross[i, j] = 255
-                    
-                    processed_image = zero_cross
-                    st.sidebar.info("Zero-crossings of LoG indicate edges.")
-            
-            # ==========================================
-            # 5.3 REGION-BASED SEGMENTATION
-            # ==========================================
-            elif seg_category == "Region-Based Segmentation":
-                region_method = st.sidebar.selectbox(
-                    "Region Method:",
-                    ["Region Growing", "Split-and-Merge (Quadtree)", "Watershed", "Connected Components"]
-                )
+                filtered = cv2.filter2D(original_image, cv2.CV_64F, kernel)
+                processed_image = np.uint8(np.abs(filtered) > thresh) * 255
+                st.info("Detects isolated points using Laplacian masks.")
                 
-                if region_method == "Region Growing":
-                    st.sidebar.markdown("### Seed Point")
-                    seed_x = st.sidebar.slider("Seed X", 0, original_image.shape[1]-1, original_image.shape[1]//2)
-                    seed_y = st.sidebar.slider("Seed Y", 0, original_image.shape[0]-1, original_image.shape[0]//2)
-                    tolerance = st.sidebar.slider("Intensity Tolerance", 1, 100, 20)
+            elif disc_type == "Line Detection":
+                # 2.4 Line Detection
+                line_orient = st.sidebar.selectbox("Orientation", ["Horizontal", "Vertical", "+45 Diagonal", "-45 Diagonal"])
+                thresh = st.sidebar.slider("Threshold", 0, 255, 127)
+                
+                masks = {
+                    "Horizontal": np.array([[-1, -1, -1], [2, 2, 2], [-1, -1, -1]]),
+                    "Vertical": np.array([[-1, 2, -1], [-1, 2, -1], [-1, 2, -1]]),
+                    "+45 Diagonal": np.array([[-1, -1, 2], [-1, 2, -1], [2, -1, -1]]),
+                    "-45 Diagonal": np.array([[2, -1, -1], [-1, 2, -1], [-1, -1, 2]])
+                }
+                
+                filtered = cv2.filter2D(original_image, cv2.CV_64F, masks[line_orient])
+                processed_image = np.uint8(np.abs(filtered) > thresh) * 255
+                st.info(f"Detects lines oriented at {line_orient}.")
+                
+            elif disc_type == "Edge Detection (Gradient)":
+                # 2.5 - 2.9 Gradient Operators
+                operator = st.sidebar.selectbox("Operator", ["Roberts", "Prewitt", "Sobel"])
+                
+                if operator == "Roberts":
+                    # 2.7 Roberts
+                    kx = np.array([[1, 0], [0, -1]], dtype=np.float64)
+                    ky = np.array([[0, 1], [-1, 0]], dtype=np.float64)
+                    st.info("Roberts Cross Operator (2x2)")
+                elif operator == "Prewitt":
+                    # 2.8 Prewitt
+                    kx = np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]], dtype=np.float64)
+                    ky = np.array([[-1, -1, -1], [0, 0, 0], [1, 1, 1]], dtype=np.float64)
+                    st.info("Prewitt Operator (3x3)")
+                else: # Sobel
+                    # 2.9 Sobel
+                    kx = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float64)
+                    ky = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float64)
+                    st.info("Sobel Operator (3x3) - Smoothing effect")
+                
+                Gx = cv2.filter2D(original_image.astype(np.float64), -1, kx)
+                Gy = cv2.filter2D(original_image.astype(np.float64), -1, ky)
+                magnitude = np.sqrt(Gx**2 + Gy**2)
+                processed_image = np.clip(magnitude, 0, 255).astype(np.uint8)
+                
+            elif disc_type == "Laplacian (2nd Derivative)":
+                # 2.10 Laplacian
+                lap_type = st.sidebar.selectbox("Method", ["Standard Laplacian", "LoG (Laplacian of Gaussian)"])
+                
+                if lap_type == "Standard Laplacian":
+                    processed_image = cv2.Laplacian(original_image, cv2.CV_8U)
+                    st.info("Second-order derivative for edge detection.")
+                else:
+                    sigma = st.sidebar.slider("Sigma", 0.5, 5.0, 1.0)
+                    blurred = cv2.GaussianBlur(original_image, (0,0), sigma)
+                    processed_image = cv2.Laplacian(blurred, cv2.CV_8U)
+                    st.info("LoG: Gaussian smoothing followed by Laplacian.")
+
+        # --- Tab 2: Thresholding ---
+        with seg_tabs[1]:
+            st.subheader("Pixel-Based Segmentation (Thresholding)")
+            thresh_mode = st.sidebar.selectbox("Thresholding Mode", 
+                ["Single (Global)", "Multiple Thresholding", "Adaptive (Local)", "Optimal (Iterative)"])
+            
+            if thresh_mode == "Single (Global)":
+                # 3.1 Single Global
+                T = st.sidebar.slider("Threshold (T)", 0, 255, 127)
+                _, processed_image = cv2.threshold(original_image, T, 255, cv2.THRESH_BINARY)
+                st.info(f"Global Thresholding: T={T}")
+                
+            elif thresh_mode == "Multiple Thresholding":
+                # 3.2 Multiple
+                T1 = st.sidebar.slider("Threshold 1", 0, 255, 80)
+                T2 = st.sidebar.slider("Threshold 2", 0, 255, 160)
+                processed_image = np.zeros_like(original_image)
+                processed_image[original_image > T1] = 127
+                processed_image[original_image > T2] = 255
+                st.info("Separates image into 3 classes (Black, Gray, White).")
+                
+            elif thresh_mode == "Adaptive (Local)":
+                # 3.5 Adaptive
+                method = st.sidebar.selectbox("Method", ["Mean", "Gaussian"])
+                block_size = st.sidebar.slider("Block Size", 3, 99, 11, step=2)
+                C = st.sidebar.slider("Constant C", -10, 10, 2)
+                
+                algo = cv2.ADAPTIVE_THRESH_MEAN_C if method == "Mean" else cv2.ADAPTIVE_THRESH_GAUSSIAN_C
+                processed_image = cv2.adaptiveThreshold(original_image, 255, algo, cv2.THRESH_BINARY, block_size, C)
+                st.info("Local thresholding for uneven illumination.")
+                
+            elif thresh_mode == "Optimal (Iterative)":
+                # 3.4 Iterative Selection
+                T = 127.0 # Initial guess
+                T_prev = 0
+                iter_count = 0
+                while abs(T - T_prev) > 0.5 and iter_count < 100:
+                    T_prev = T
+                    mu1 = original_image[original_image > T].mean() if len(original_image[original_image > T]) > 0 else 0
+                    mu2 = original_image[original_image <= T].mean() if len(original_image[original_image <= T]) > 0 else 0
+                    T = (mu1 + mu2) / 2
+                    iter_count += 1
+                
+                _, processed_image = cv2.threshold(original_image, int(T), 255, cv2.THRESH_BINARY)
+                st.success(f"Converged at T={int(T)} in {iter_count} iterations.")
+
+        # --- Tab 3: Region-Based ---
+        with seg_tabs[2]:
+            st.subheader("Region-Based Segmentation")
+            reg_method = st.sidebar.selectbox("Method", ["Region Growing", "Split-and-Merge"])
+            
+            if reg_method == "Region Growing":
+                # 4.2 Region Growing
+                seed_x = st.sidebar.slider("Seed X", 0, original_image.shape[1]-1, original_image.shape[1]//2)
+                seed_y = st.sidebar.slider("Seed Y", 0, original_image.shape[0]-1, original_image.shape[0]//2)
+                thresh = st.sidebar.slider("Similarity Threshold", 1, 50, 10)
+                
+                # Simple region growing
+                h, w = original_image.shape
+                mask = np.zeros((h+2, w+2), np.uint8)
+                processed_image = original_image.copy()
+                cv2.floodFill(processed_image, mask, (seed_x, seed_y), 255, loDiff=thresh, upDiff=thresh)
+                # Highlight the region
+                _, processed_image = cv2.threshold(mask[1:-1, 1:-1], 0, 255, cv2.THRESH_BINARY)
+                st.info(f"Region growing from seed ({seed_x}, {seed_y}).")
+                
+            else:
+                # 4.3 - 4.5 Split and Merge (Simulated with Quadtree decomposition visualization)
+                st.info("Simulating Split-and-Merge (Quadtree Decomposition)")
+                min_std = st.sidebar.slider("Min Std Dev", 0, 50, 10)
+                
+                # Recursive function for quadtree
+                def split_image(img):
+                    if img.std() <= min_std or img.shape[0] <= 4:
+                        return np.full(img.shape, img.mean(), dtype=np.uint8)
                     
-                    # Region growing implementation
-                    h, w = original_image.shape
-                    visited = np.zeros((h, w), dtype=bool)
-                    region = np.zeros((h, w), dtype=np.uint8)
-                    seed_intensity = original_image[seed_y, seed_x]
+                    h, w = img.shape
+                    h2, w2 = h//2, w//2
+                    top_left = split_image(img[:h2, :w2])
+                    top_right = split_image(img[:h2, w2:])
+                    bot_left = split_image(img[h2:, :w2])
+                    bot_right = split_image(img[h2:, w2:])
                     
-                    stack = [(seed_y, seed_x)]
-                    
-                    while stack:
-                        y, x = stack.pop()
-                        if y < 0 or y >= h or x < 0 or x >= w:
-                            continue
-                        if visited[y, x]:
-                            continue
-                        if abs(int(original_image[y, x]) - int(seed_intensity)) > tolerance:
-                            continue
-                        
-                        visited[y, x] = True
-                        region[y, x] = 255
-                        
-                        # 8-connectivity
-                        for dy in [-1, 0, 1]:
-                            for dx in [-1, 0, 1]:
-                                if dy != 0 or dx != 0:
-                                    stack.append((y + dy, x + dx))
-                    
-                    processed_image = region
-                    # Mark seed point
-                    cv2.circle(processed_image, (seed_x, seed_y), 5, 128, -1)
-                    st.sidebar.success(f"Seed at ({seed_x}, {seed_y}), intensity={seed_intensity}")
-                    st.sidebar.info("Grows region from seed by adding similar neighbors.")
-                    
-                elif region_method == "Split-and-Merge (Quadtree)":
-                    # Simplified split-and-merge
-                    std_threshold = st.sidebar.slider("Uniformity Threshold (Std Dev)", 5, 100, 30)
-                    min_size = st.sidebar.slider("Minimum Region Size", 4, 64, 8)
-                    
-                    def split_merge(img, threshold, min_sz):
-                        h, w = img.shape
-                        result = np.zeros_like(img)
-                        
-                        def process_region(y1, y2, x1, x2):
-                            region = img[y1:y2, x1:x2]
-                            if region.size == 0:
-                                return
-                            
-                            std = np.std(region)
-                            
-                            # If uniform or too small, fill with mean
-                            if std < threshold or (y2 - y1) <= min_sz or (x2 - x1) <= min_sz:
-                                result[y1:y2, x1:x2] = np.mean(region)
-                            else:
-                                # Split into 4 quadrants
-                                my, mx = (y1 + y2) // 2, (x1 + x2) // 2
-                                process_region(y1, my, x1, mx)  # Top-left
-                                process_region(y1, my, mx, x2)  # Top-right
-                                process_region(my, y2, x1, mx)  # Bottom-left
-                                process_region(my, y2, mx, x2)  # Bottom-right
-                        
-                        process_region(0, h, 0, w)
-                        return result
-                    
-                    processed_image = split_merge(original_image, std_threshold, min_size).astype(np.uint8)
-                    st.sidebar.info("Recursively splits non-uniform regions, fills uniform ones with mean.")
-                    
-                elif region_method == "Watershed":
-                    # Watershed segmentation
-                    st.sidebar.markdown("### Watershed Parameters")
-                    blur_size = st.sidebar.slider("Pre-blur Size", 1, 15, 5, step=2)
-                    dist_thresh = st.sidebar.slider("Distance Threshold (%)", 10, 90, 50)
-                    
-                    # Preprocess
-                    blurred = cv2.GaussianBlur(original_image, (blur_size, blur_size), 0)
-                    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                    
-                    # Distance transform
-                    dist_transform = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
-                    _, sure_fg = cv2.threshold(dist_transform, dist_thresh/100 * dist_transform.max(), 255, 0)
-                    sure_fg = np.uint8(sure_fg)
-                    
-                    # Sure background
-                    kernel = np.ones((3, 3), np.uint8)
-                    sure_bg = cv2.dilate(binary, kernel, iterations=3)
-                    
-                    # Unknown region
-                    unknown = cv2.subtract(sure_bg, sure_fg)
-                    
-                    # Marker labelling
-                    _, markers = cv2.connectedComponents(sure_fg)
-                    markers = markers + 1
-                    markers[unknown == 255] = 0
-                    
-                    # Apply watershed
-                    img_color = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR)
-                    markers = cv2.watershed(img_color, markers)
-                    
-                    # Create output
-                    processed_image = np.zeros_like(original_image)
-                    processed_image[markers == -1] = 255  # Boundaries
-                    
-                    # Also show regions in different intensities
-                    for i in range(2, markers.max() + 1):
-                        processed_image[markers == i] = (i * 40) % 256
-                    
-                    st.sidebar.info("Treats image as topography, finds watershed lines.")
-                    
-                elif region_method == "Connected Components":
-                    # Connected components labeling
-                    thresh_val = st.sidebar.slider("Binary Threshold", 0, 255, 127)
-                    connectivity = st.sidebar.selectbox("Connectivity:", [4, 8])
-                    
-                    _, binary = cv2.threshold(original_image, thresh_val, 255, cv2.THRESH_BINARY)
-                    
-                    num_labels, labels = cv2.connectedComponents(binary, connectivity=connectivity)
-                    
-                    # Create colored output
-                    processed_image = np.zeros_like(original_image)
-                    for i in range(1, num_labels):
-                        processed_image[labels == i] = (i * 37) % 256  # Assign different intensities
-                    
-                    st.sidebar.success(f"Found **{num_labels - 1}** connected components")
-                    st.sidebar.info(f"Labels objects using {connectivity}-connectivity.")
+                    # Reconstruct
+                    top = np.hstack((top_left, top_right))
+                    bot = np.hstack((bot_left, bot_right))
+                    return np.vstack((top, bot))
+                
+                processed_image = split_image(original_image)
+
+        # --- Tab 4: Boundary & Corner ---
+        with seg_tabs[3]:
+            st.subheader("Boundary & Corner Detection")
+            feat_type = st.sidebar.selectbox("Feature", ["Corner Detection", "Boundary Extraction"])
+            
+            if feat_type == "Corner Detection":
+                # 5.2 Corner Detection (Harris)
+                block_size = st.sidebar.slider("Block Size", 2, 10, 2)
+                k_size = st.sidebar.slider("Sobel Aperture", 1, 7, 3, step=2)
+                k = st.sidebar.slider("Harris Parameter k", 0.01, 0.1, 0.04)
+                
+                dst = cv2.cornerHarris(original_image, block_size, k_size, k)
+                dst = cv2.dilate(dst, None)
+                
+                # Draw corners on image
+                processed_image = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR)
+                processed_image[dst > 0.01 * dst.max()] = [0, 0, 255]
+                st.info("Harris Corner Detection.")
+                
+            else:
+                # 6.2 Boundary Detection
+                kernel_size = st.sidebar.slider("Structuring Element Size", 3, 7, 3, step=2)
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+                erosion = cv2.erode(original_image, kernel, iterations=1)
+                processed_image = original_image - erosion
+                st.info("Boundary = Image - Erode(Image)")
+
+        # --- Tab 5: Theory ---
+        with seg_tabs[4]:
+            st.markdown("""
+            ### 1. Introduction to Segmentation
+            **Goal:** Divide image into meaningful regions (objects).
+            - **Discontinuity-based:** Detects edges, lines, points.
+            - **Similarity-based:** Groups pixels with similar properties (thresholding, region growing).
+
+            ### 2. Detection of Discontinuities (Edge-Based)
+            **2.1 Types:** Point, Line, Edge.
+            **2.2 Masks:** Convolution with 3x3 masks.
+            **2.7 Roberts:** 2x2 cross-gradient operator.
+            **2.8 Prewitt:** 3x3 masks (Horizontal/Vertical).
+            **2.9 Sobel:** 3x3 masks with smoothing (1-2-1 weights).
+            **2.10 Laplacian:** Second-order derivative, detects zero-crossings.
+
+            ### 3. Thresholding (Pixel-Based)
+            **3.1 Global:** $g(x,y) = 1$ if $f(x,y) > T$, else 0.
+            **3.4 Iterative Selection:**
+            1. Pick initial $T$.
+            2. Split into groups $G_1, G_2$.
+            3. Compute means $\mu_1, \mu_2$.
+            4. Update $T = (\mu_1 + \mu_2) / 2$.
+            5. Repeat until stable.
+            **3.5 Adaptive:** Local thresholds for uneven illumination.
+
+            ### 4. Region-Based Segmentation
+            **4.2 Region Growing:** Start at seed, add neighbors if similar.
+            **4.3 Region Splitting:** Split non-uniform regions (Quadtrees).
+            **4.4 Region Merging:** Merge adjacent uniform regions.
+            **4.5 Split-and-Merge:** Combine both for optimal results.
+
+            ### 5. Line, Edge & Corner
+            **5.2 Corner Detection:** Intensity variation in two directions.
+            **5.3 Edge Linking:** Connect edge points to form boundaries.
+            """)
 
     # --- Display Result ---
     with col2:
